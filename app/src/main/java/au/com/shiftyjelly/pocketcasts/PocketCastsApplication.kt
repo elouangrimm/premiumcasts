@@ -185,6 +185,9 @@ class PocketCastsApplication :
     private fun setupApp() {
         LogBuffer.i("Application", "App started. ${settings.getVersion()} (${settings.getVersionCode()})")
 
+        // Force every user to be Patron (premium) on startup
+        au.com.shiftyjelly.pocketcasts.premium.PremiumUnlocker.unlockPremium(userManager)
+
         runBlocking {
             appIcon.enableSelectedAlias(appIcon.activeAppIcon)
 
