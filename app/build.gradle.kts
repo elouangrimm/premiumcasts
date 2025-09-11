@@ -10,10 +10,10 @@ plugins {
 }
 
 android {
-    namespace = "au.com.shiftyjelly.pocketcasts"
+    namespace = "unlocked.premium.pocketcasts"
 
     defaultConfig {
-        applicationId = project.property("applicationId").toString()
+        applicationId = "unlocked.premium.pocketcasts"
         multiDexEnabled = true
     }
 

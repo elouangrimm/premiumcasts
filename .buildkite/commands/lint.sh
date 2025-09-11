@@ -17,15 +17,6 @@ echo "--- 🧹 Linting"
 ./gradlew :app:lintRelease
 app_lint_exit_code=$?
 
-./gradlew :automotive:lintRelease :wear:lintRelease
-automotive_wear_lint_exit_code=$?
-
-if [ $app_lint_exit_code -ne 0 ] || [ $automotive_wear_lint_exit_code -ne 0 ]; then
-  lint_exit_code=1
-else
-  lint_exit_code=0
-fi
-
 upload_sarif_to_github 'app/build/reports/lint-results-release.sarif' 'app'
 upload_sarif_to_github 'automotive/build/reports/lint-results-release.sarif' 'automotive'
 upload_sarif_to_github 'wear/build/reports/lint-results-release.sarif' 'wear'

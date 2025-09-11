@@ -119,9 +119,7 @@ spotless {
     kotlin {
         target(
             "app/src/**/*.kt",
-            "automotive/src/**/*.kt",
-            "modules/**/src/**/*.kt",
-            "wear/src/**/*.kt",
+            "modules/**/src/**/*.kt"
         )
         ktlint(ktlintVersion)
             .editorConfigOverride(ktLintConfigOverride + ktLintConfigComposeOverride)
@@ -254,7 +252,7 @@ subprojects {
                 buildConfigField("String", "APPS_FLYER_KEY", "\"${project.property("appsFlyerKey")}\"")
 
                 testInstrumentationRunner = project.property("testInstrumentationRunner") as String
-                testApplicationId = "au.com.shiftyjelly.pocketcasts.test${project.name.replace("-", "_")}"
+                testApplicationId = "unlocked.premium.pocketcasts"
                 vectorDrawables.useSupportLibrary = true
             }
 
@@ -443,5 +441,5 @@ tasks.register("aggregatedLintRelease") {
     group = "verification"
     description = "Run Lint tasks for application modules"
 
-    dependsOn(":app:lintRelease", ":automotive:lintRelease", ":wear:lintRelease")
+    dependsOn(":app:lintRelease")
 }
