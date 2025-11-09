@@ -1,0 +1,14 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -11,10 +11,10 @@
+ }
+
+ android {
+-    namespace = "au.com.shiftyjelly.pocketcasts"
++    namespace = "unlocked.premium.pocketcasts"
+
+     defaultConfig {
+-        applicationId = "au.com.shiftyjelly.pocketcasts"
++        applicationId = "unlocked.premium.pocketcasts"
+         multiDexEnabled = true
+     }

@@ -1,0 +1,39 @@
+name: Build Patched Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Apply patch to change Application ID
+      run: git apply change-appid.patch
+
+    - name: Apply patch to unlock premium features
+      run: git apply unlock-premium.patch
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Make gradlew executable
+      run: chmod +x ./gradlew
+
+    - name: Build with Gradle
+      run: ./gradlew :app:assembleDebugProd
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: pocket-casts-unlocked-apk
+        path: app/build/outputs/apk/debugProd/app-debugProd.apk
