@@ -1,0 +1,28 @@
+--- a/app/src/main/java/au/com/shiftyjelly/pocketcasts/PocketCastsApplication.kt
++++ b/app/src/main/java/au/com/shiftyjelly/pocketcasts/PocketCastsApplication.kt
+@@ -53,6 +53,7 @@
+ import coil.Coil
+ import coil.ImageLoader
+ import com.google.firebase.FirebaseApp
++import com.google.firebase.FirebaseOptions
+ import com.squareup.moshi.Moshi
+ import dagger.hilt.android.HiltAndroidApp
+ import java.io.File
+@@ -155,6 +156,17 @@
+
+         super.onCreate()
+
++        // Manually initialize Firebase with dummy options to prevent crash.
++        // This is necessary because the google-services plugin is disabled, which
++        // normally handles this process automatically.
++        if (FirebaseApp.getApps(this).isEmpty()) {
++            val options = FirebaseOptions.Builder()
++                .setApplicationId("1:1234567890:android:dummy")
++                .setApiKey("dummy-api-key")
++                .build()
++            FirebaseApp.initializeApp(this, options)
++        }
++
+         RxJavaUncaughtExceptionHandling.setUp()
+         setupCrashLogging()
+         setupLogging()
