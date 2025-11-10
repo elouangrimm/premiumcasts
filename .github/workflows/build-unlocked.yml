@@ -27,10 +27,11 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build with Gradle
-        run: ./gradlew :app:assembleDebugProd
+        run: ./gradlew :app:assembleRelease
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: unlocked-pocket-casts.apk
-          path: app/build/outputs/apk/debugProd/app-debugProd.apk
+          files: app/build/outputs/apk/release/app-release-unsigned.apk
+          tag_name: build-${{ github.run_number }}
+          body: "Automated build of unlocked Pocket Casts APK."
