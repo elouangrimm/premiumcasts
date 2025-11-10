@@ -1,5 +1,4 @@
 diff --git a/app/build.gradle.kts b/app/build.gradle.kts
-index 6c3e3b7..d2c1b9a 100644
 --- a/app/build.gradle.kts
 +++ b/app/build.gradle.kts
 @@ -4,7 +4,7 @@
@@ -21,7 +20,6 @@ index 6c3e3b7..d2c1b9a 100644
          multiDexEnabled = true
      }
 diff --git a/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt b/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt
-index 28a7c2e..b4d7c0f 100644
 --- a/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt
 +++ b/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt
 @@ -17,18 +17,7 @@
@@ -45,3 +43,32 @@ index 28a7c2e..b4d7c0f 100644
 +        return PaymentResult.Success(purchase)
      }
  }
+diff --git a/app/src/main/java/au/com/shiftyjelly/pocketcasts/PocketCastsApplication.kt b/app/src/main/java/au/com/shiftyjelly/pocketcasts/PocketCastsApplication.kt
+--- a/app/src/main/java/au/com/shiftyjelly/pocketcasts/PocketCastsApplication.kt
++++ b/app/src/main/java/au/com/shiftyjelly/pocketcasts/PocketCastsApplication.kt
+@@ -53,6 +53,7 @@
+ import coil.Coil
+ import coil.ImageLoader
+ import com.google.firebase.FirebaseApp
++import com.google.firebase.FirebaseOptions
+ import com.squareup.moshi.Moshi
+ import dagger.hilt.android.HiltAndroidApp
+ import java.io.File
+@@ -155,6 +156,17 @@
+
+         super.onCreate()
+
++        // Manually initialize Firebase with dummy options to prevent crash.
++        // This is necessary because the google-services plugin is disabled, which
++        // normally handles this process automatically.
++        if (FirebaseApp.getApps(this).isEmpty()) {
++            val options = FirebaseOptions.Builder()
++                .setApplicationId("1:1234567890:android:dummy")
++                .setApiKey("dummy-api-key")
++                .build()
++            FirebaseApp.initializeApp(this, options)
++        }
++
+         RxJavaUncaughtExceptionHandling.setUp()
+         setupCrashLogging()
+         setupLogging()
