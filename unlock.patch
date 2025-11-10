@@ -10,15 +10,30 @@ diff --git a/app/build.gradle.kts b/app/build.gradle.kts
      alias(libs.plugins.compose.compiler)
  }
 
-@@ -13,7 +13,7 @@
-     namespace = "au.com.shiftyjelly.pocketcasts"
-
-     defaultConfig {
--        applicationId = project.property("applicationId").toString()
-+        applicationId = "unlocked.premium.pocketcasts"
-         targetSdk = project.property("targetSdkVersion") as Int
+@@ -20,6 +20,17 @@
          multiDexEnabled = true
      }
+
++    signingConfigs {
++        create("release") {
++            storeFile = file("../debug.keystore")
++            storePassword = "android"
++            keyAlias = "androiddebugkey"
++            keyPassword = "android"
++        }
++    }
++
+     sourceSets {
+         getByName("androidTest") {
+             assets.srcDir(files("$rootDir/modules/services/model/schemas"))
+@@ -47,6 +58,7 @@
+
+         named("release") {
+             manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
++            signingConfig = signingConfigs.getByName("release")
+
+             if (!file("${project.rootDir}/sentry.properties").exists()) {
+                 println("WARNING: Sentry configuration file 'sentry.properties' not found. The ProGuard mapping files won't be uploaded.")
 diff --git a/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt b/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt
 --- a/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt
 +++ b/modules/services/repositories/src/main/java/au/com/shiftyjelly/pocketcasts/repositories/subscription/ServerPurchaseApprover.kt
