@@ -2,6 +2,15 @@ diff --git a/app/build.gradle.kts b/app/build.gradle.kts
 index 6c3e3b7..d2c1b9a 100644
 --- a/app/build.gradle.kts
 +++ b/app/build.gradle.kts
+@@ -4,7 +4,7 @@
+     alias(libs.plugins.ksp)
+     alias(libs.plugins.hilt)
+     alias(libs.plugins.sentry)
+-    alias(libs.plugins.google.services)
++    // alias(libs.plugins.google.services)
+     alias(libs.plugins.compose.compiler)
+ }
+
 @@ -13,7 +13,7 @@
      namespace = "au.com.shiftyjelly.pocketcasts"
 
