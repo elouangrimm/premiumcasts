@@ -5,7 +5,7 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.sentry)
-    alias(libs.plugins.google.services)
+    // alias(libs.plugins.google.services)
     alias(libs.plugins.compose.compiler)
 }
 
@@ -13,7 +13,7 @@ android {
     namespace = "au.com.shiftyjelly.pocketcasts"
 
     defaultConfig {
-        applicationId = project.property("applicationId").toString()
+        applicationId = "unlocked.premium.pocketcasts"
         targetSdk = project.property("targetSdkVersion") as Int
         multiDexEnabled = true
     }
@@ -21,6 +21,15 @@ android {
     sourceSets {
         getByName("androidTest") {
             assets.srcDir(files("$rootDir/modules/services/model/schemas"))
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("../debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 
@@ -45,6 +54,7 @@ android {
 
         named("release") {
             manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+            signingConfig = signingConfigs.getByName("release")
 
             if (!file("${project.rootDir}/sentry.properties").exists()) {
                 println("WARNING: Sentry configuration file 'sentry.properties' not found. The ProGuard mapping files won't be uploaded.")
