@@ -47,6 +47,7 @@ import au.com.shiftyjelly.pocketcasts.widget.PlayerWidgetManager
 import coil.Coil
 import coil.ImageLoader
 import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.squareup.moshi.Moshi
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
@@ -157,6 +158,17 @@ class PocketCastsApplication :
         }
 
         super.onCreate()
+
+        // Manually initialize Firebase with dummy options to prevent crash.
+        // This is necessary because the google-services plugin is disabled, which
+        // normally handles this process automatically.
+        if (FirebaseApp.getApps(this).isEmpty()) {
+            val options = FirebaseOptions.Builder()
+                .setApplicationId("1:1234567890:android:dummy")
+                .setApiKey("dummy-api-key")
+                .build()
+            FirebaseApp.initializeApp(this, options)
+        }
 
         RxJavaUncaughtExceptionHandling.setUp()
         setupCrashLogging()

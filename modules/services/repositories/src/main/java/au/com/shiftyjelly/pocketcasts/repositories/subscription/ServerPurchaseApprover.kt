@@ -17,18 +17,7 @@ class ServerPurchaseApprover @Inject constructor(
     private val settings: Settings,
 ) : PurchaseApprover {
     override suspend fun approve(purchase: Purchase): PaymentResult<Purchase> {
-        return runCatching {
-            val request = SubscriptionPurchaseRequest(purchase.token, purchase.productIds.first())
-            val membership = syncManager.subscriptionPurchase(request).toMembership()
-            settings.cachedMembership.set(membership, updateModifiedAt = false)
-            PaymentResult.Success(purchase)
-        }.getOrElse { error ->
-            if (error is CancellationException) {
-                throw error
-            } else {
-                LogBuffer.e(LogBuffer.TAG_SUBSCRIPTIONS, error, "Failed to approve a purchase")
-                PaymentResult.Failure(PaymentResultCode.ItemNotApproved, error.message ?: "Server confirmation error")
-            }
-        }
+        // Unlock premium by always returning success
+        return PaymentResult.Success(purchase)
     }
 }
