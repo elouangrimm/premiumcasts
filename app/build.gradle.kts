@@ -56,7 +56,7 @@ android {
         }
 
         named("release") {
-            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_radioactive"
             signingConfig = signingConfigs.getByName("release")
 
             if (project.findProperty("sentryAndroidProject")?.toString().isNullOrBlank()) {
