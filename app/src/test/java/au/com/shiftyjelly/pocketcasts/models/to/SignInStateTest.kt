@@ -30,17 +30,17 @@ class SignInStateTest {
         // test a Web Player paying subscriber
         val stateWebPlayer = SignInState.SignedIn(email = email, subscription = subscription.copy(platform = SubscriptionPlatform.Web))
         assert(stateWebPlayer.isSignedInAsPaid)
-        // test a gift user
+        // test a gift user - premium is always unlocked
         val statePayingGift = SignInState.SignedIn(email = email, subscription = subscription.copy(platform = SubscriptionPlatform.Gift))
-        assert(!statePayingGift.isSignedInAsPaid)
+        assert(statePayingGift.isSignedInAsPaid)
         // test a paying subscriber
         val statePaying = SignInState.SignedIn(email = email, subscription = subscription)
         assert(statePaying.isSignedInAsPaid)
         // a cancelled subscriber should still have access to the paid features, we don't need to check the expiry as loading the state will covert it to a free account
         val stateCancelled = SignInState.SignedIn(email = email, subscription = subscription.copy(isAutoRenewing = false))
         assert(stateCancelled.isSignedInAsPaid)
-        // free users should not have access to paid features
+        // free users also have access to paid features since premium is unlocked
         val stateFree = SignInState.SignedIn(email = email, subscription = null)
-        assert(!stateFree.isSignedInAsPaid)
+        assert(stateFree.isSignedInAsPaid)
     }
 }
