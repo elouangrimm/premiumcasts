@@ -4,14 +4,11 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.toLiveData
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
-import au.com.shiftyjelly.pocketcasts.analytics.EpisodeAnalytics
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadHelper
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadManager
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadQueue
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadType
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
 import au.com.shiftyjelly.pocketcasts.repositories.playback.containsUuid
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
@@ -20,6 +17,17 @@ import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
 import au.com.shiftyjelly.pocketcasts.views.helper.CloudDeleteHelper
 import au.com.shiftyjelly.pocketcasts.views.helper.DeleteState
+import com.automattic.eventhorizon.EpisodeDeletedFromCloudEvent
+import com.automattic.eventhorizon.EpisodeMarkedAsPlayedEvent
+import com.automattic.eventhorizon.EpisodeMarkedAsUnplayedEvent
+import com.automattic.eventhorizon.EpisodeUploadCancelledEvent
+import com.automattic.eventhorizon.EpisodeUploadQueuedEvent
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.UploadedFileDetailModalOptionType
+import com.automattic.eventhorizon.UploadedFilePlayOptionType
+import com.automattic.eventhorizon.UserFileDeletedEvent
+import com.automattic.eventhorizon.UserFileDetailOptionTappedEvent
+import com.automattic.eventhorizon.UserFilePlayPauseButtonTappedEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.reactivex.BackpressureStrategy
 import io.reactivex.rxkotlin.Flowables
@@ -33,10 +41,9 @@ class CloudBottomSheetViewModel @Inject constructor(
     private val userEpisodeManager: UserEpisodeManager,
     private val playbackManager: PlaybackManager,
     private val episodeManager: EpisodeManager,
-    private val downloadManager: DownloadManager,
+    private val downloadQueue: DownloadQueue,
     private val podcastManager: PodcastManager,
-    private val analyticsTracker: AnalyticsTracker,
-    private val episodeAnalytics: EpisodeAnalytics,
+    private val eventHorizon: EventHorizon,
     @ApplicationScope private val applicationScope: CoroutineScope,
     userManager: UserManager,
 ) : ViewModel() {
@@ -55,7 +62,7 @@ class CloudBottomSheetViewModel @Inject constructor(
     }
 
     fun getDeleteStateOnDeleteClick(episode: UserEpisode): DeleteState {
-        trackOptionTapped(DELETE)
+        trackOptionTapped(UploadedFileDetailModalOptionType.Delete)
         return CloudDeleteHelper.getDeleteState(episode)
     }
 
@@ -63,114 +70,136 @@ class CloudBottomSheetViewModel @Inject constructor(
         CloudDeleteHelper.deleteEpisode(
             episode = episode,
             deleteState = deleteState,
+            sourceView = source,
+            downloadQueue = downloadQueue,
             playbackManager = playbackManager,
-            episodeManager = episodeManager,
             userEpisodeManager = userEpisodeManager,
             applicationScope = applicationScope,
         )
-        analyticsTracker.track(AnalyticsEvent.USER_FILE_DELETED)
-        episodeAnalytics.trackEvent(
-            event = if (deleteState == DeleteState.Cloud && !episode.isDownloaded) AnalyticsEvent.EPISODE_DELETED_FROM_CLOUD else AnalyticsEvent.EPISODE_DOWNLOAD_DELETED,
-            source = source,
-            uuid = episode.uuid,
-        )
+        eventHorizon.track(UserFileDeletedEvent)
+        if (deleteState == DeleteState.Cloud) {
+            eventHorizon.track(
+                EpisodeDeletedFromCloudEvent(
+                    episodeUuid = episode.uuid,
+                    source = source.eventHorizonValue,
+                ),
+            )
+        }
+        viewModelScope.launch {
+            episodeManager.disableAutoDownload(episode)
+        }
     }
 
     fun uploadEpisode(episode: UserEpisode) {
         userEpisodeManager.uploadToServer(episode, waitForWifi = false)
-        episodeAnalytics.trackEvent(AnalyticsEvent.EPISODE_UPLOAD_QUEUED, source = source, uuid = episode.uuid)
+        eventHorizon.track(
+            EpisodeUploadQueuedEvent(
+                episodeUuid = episode.uuid,
+                source = source.eventHorizonValue,
+            ),
+        )
     }
 
     fun removeEpisode(episode: UserEpisode) {
         userEpisodeManager.removeFromCloud(episode)
-        trackOptionTapped(DELETE_FROM_CLOUD)
-        episodeAnalytics.trackEvent(AnalyticsEvent.EPISODE_DELETED_FROM_CLOUD, source = source, uuid = episode.uuid)
+        trackOptionTapped(UploadedFileDetailModalOptionType.DeleteFromCloud)
+        eventHorizon.track(
+            EpisodeDeletedFromCloudEvent(
+                episodeUuid = episode.uuid,
+                source = source.eventHorizonValue,
+            ),
+        )
     }
 
     fun cancelUpload(episode: UserEpisode) {
         userEpisodeManager.cancelUpload(episode)
-        trackOptionTapped(CANCEL_UPLOAD)
-        episodeAnalytics.trackEvent(AnalyticsEvent.EPISODE_UPLOAD_CANCELLED, source = source, uuid = episode.uuid)
+        trackOptionTapped(UploadedFileDetailModalOptionType.CancelUpload)
+        eventHorizon.track(
+            EpisodeUploadCancelledEvent(
+                episodeUuid = episode.uuid,
+                source = source.eventHorizonValue,
+            ),
+        )
     }
 
     fun cancelDownload(episode: UserEpisode) {
-        downloadManager.removeEpisodeFromQueue(episode, "cloud bottom sheet")
-        trackOptionTapped(CANCEL_DOWNLOAD)
+        downloadQueue.cancel(episode.uuid, source)
+        trackOptionTapped(UploadedFileDetailModalOptionType.CancelDownload)
     }
 
     fun download(episode: UserEpisode) {
-        viewModelScope.launch(Dispatchers.Default) {
-            DownloadHelper.manuallyDownloadEpisodeNow(episode, "cloud bottom sheet", downloadManager, episodeManager, source = source)
-        }
+        downloadQueue.enqueue(episode.uuid, DownloadType.UserTriggered(waitForWifi = false), source)
     }
 
     fun removeFromUpNext(episode: UserEpisode) {
         playbackManager.removeEpisode(episodeToRemove = episode, source = source)
-        trackOptionTapped(UP_NEXT_DELETE)
+        trackOptionTapped(UploadedFileDetailModalOptionType.UpNextDelete)
     }
 
     fun playNext(episode: UserEpisode) {
         applicationScope.launch(Dispatchers.Default) {
             playbackManager.playNext(episode = episode, source = source)
-            trackOptionTapped(UP_NEXT_ADD_TOP)
+            trackOptionTapped(UploadedFileDetailModalOptionType.UpNextAddTop)
         }
     }
 
     fun playLast(episode: UserEpisode) {
         applicationScope.launch(Dispatchers.Default) {
             playbackManager.playLast(episode = episode, source = source)
-            trackOptionTapped(UP_NEXT_ADD_BOTTOM)
+            trackOptionTapped(UploadedFileDetailModalOptionType.UpNextAddBottom)
         }
     }
 
     fun markAsPlayed(episode: UserEpisode) {
         viewModelScope.launch(Dispatchers.Default) {
             episodeManager.markAsPlayedBlocking(episode, playbackManager, podcastManager)
-            episodeAnalytics.trackEvent(AnalyticsEvent.EPISODE_MARKED_AS_PLAYED, source, episode.uuid)
-            trackOptionTapped(MARK_PLAYED)
+            eventHorizon.track(
+                EpisodeMarkedAsPlayedEvent(
+                    episodeUuid = episode.uuid,
+                    source = source.eventHorizonValue,
+                ),
+            )
+            trackOptionTapped(UploadedFileDetailModalOptionType.MarkPlayed)
         }
     }
 
     fun markAsUnplayed(episode: UserEpisode) {
         viewModelScope.launch(Dispatchers.Default) {
             episodeManager.markAsNotPlayedBlocking(episode)
-            episodeAnalytics.trackEvent(AnalyticsEvent.EPISODE_MARKED_AS_UNPLAYED, source, episode.uuid)
-            trackOptionTapped(MARK_UNPLAYED)
+            eventHorizon.track(
+                EpisodeMarkedAsUnplayedEvent(
+                    episodeUuid = episode.uuid,
+                    source = source.eventHorizonValue,
+                ),
+            )
+            trackOptionTapped(UploadedFileDetailModalOptionType.MarkUnplayed)
         }
     }
 
     fun playNow(episode: UserEpisode, forceStream: Boolean) {
         playbackManager.playNow(episode = episode, forceStream = forceStream, sourceView = source)
-        analyticsTracker.track(AnalyticsEvent.USER_FILE_PLAY_PAUSE_BUTTON_TAPPED, mapOf(OPTION_KEY to PLAY))
+        eventHorizon.track(
+            UserFilePlayPauseButtonTappedEvent(
+                option = UploadedFilePlayOptionType.Play,
+            ),
+        )
     }
 
     fun pause() {
         playbackManager.pause(sourceView = source)
-        analyticsTracker.track(AnalyticsEvent.USER_FILE_PLAY_PAUSE_BUTTON_TAPPED, mapOf(OPTION_KEY to PAUSE))
+        eventHorizon.track(
+            UserFilePlayPauseButtonTappedEvent(
+                option = UploadedFilePlayOptionType.Pause,
+            ),
+        )
     }
 
-    fun trackOptionTapped(option: String) {
-        analyticsTracker.track(AnalyticsEvent.USER_FILE_DETAIL_OPTION_TAPPED, mapOf(OPTION_KEY to option))
-    }
-
-    companion object {
-        private const val OPTION_KEY = "option"
-        private const val UP_NEXT_DELETE = "up_next_delete"
-        private const val UP_NEXT_ADD_TOP = "up_next_add_top"
-        private const val UP_NEXT_ADD_BOTTOM = "up_next_add_bottom"
-        private const val MARK_PLAYED = "mark_played"
-        private const val MARK_UNPLAYED = "mark_unplayed"
-        private const val DELETE = "delete"
-        private const val CANCEL_UPLOAD = "cancel_upload"
-        private const val CANCEL_DOWNLOAD = "cancel_download"
-        private const val DELETE_FROM_CLOUD = "delete_from_cloud"
-        private const val PLAY = "play"
-        private const val PAUSE = "pause"
-        const val EDIT = "edit"
-        const val UPLOAD = "upload"
-        const val DOWNLOAD = "download"
-        const val UPLOAD_UPGRADE_REQUIRED = "upload_upgrade_required"
-        const val BOOKMARKS = "bookmarks"
+    fun trackOptionTapped(option: UploadedFileDetailModalOptionType) {
+        eventHorizon.track(
+            UserFileDetailOptionTappedEvent(
+                option = option,
+            ),
+        )
     }
 }
 

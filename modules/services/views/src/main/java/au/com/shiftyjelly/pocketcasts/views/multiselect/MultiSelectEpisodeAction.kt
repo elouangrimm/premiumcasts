@@ -116,9 +116,16 @@ sealed class MultiSelectEpisodeAction(
         iconRes = IR.drawable.ic_delete,
         analyticsValue = "remove_listening_history",
     )
+    object AddToPlaylist : MultiSelectEpisodeAction(
+        groupId = "add_to_playlist",
+        actionId = UR.id.menu_add_to_playlist,
+        title = LR.string.add_to_playlist_description,
+        iconRes = IR.drawable.ic_add_to_playlist_action,
+        analyticsValue = "add_to_playlist",
+    )
 
     companion object {
-        private val STANDARD = listOf(Download, Archive, MarkAsPlayed, PlayNext, PlayLast, Star, Share, RemoveListeningHistory)
+        private val STANDARD = listOf(Download, Archive, MarkAsPlayed, PlayNext, AddToPlaylist, PlayLast, Star, Share, RemoveListeningHistory)
         private val ALL = STANDARD + listOf(DeleteDownload, DeleteUserEpisode, MarkAsUnplayed, Unstar, Unarchive)
         private val STANDARD_BY_GROUP_ID = STANDARD.associateBy { it.groupId }
         val ALL_BY_ACTION_ID = ALL.associateBy { it.actionId }
@@ -140,6 +147,7 @@ sealed class MultiSelectEpisodeAction(
 
                     return DeleteDownload
                 }
+
                 Archive.groupId -> {
                     for (episode in selected) {
                         if (episode is PodcastEpisode && !episode.isArchived) {
@@ -149,6 +157,7 @@ sealed class MultiSelectEpisodeAction(
 
                     return if (selected.filterIsInstance<UserEpisode>().size == selected.size) DeleteUserEpisode else Unarchive
                 }
+
                 MarkAsPlayed.groupId -> {
                     for (episode in selected) {
                         if (!episode.isFinished) {
@@ -158,6 +167,7 @@ sealed class MultiSelectEpisodeAction(
 
                     return MarkAsUnplayed
                 }
+
                 Star.groupId -> {
                     if (selected.filterIsInstance<UserEpisode>().isNotEmpty()) return null
                     for (episode in selected) {
@@ -168,6 +178,7 @@ sealed class MultiSelectEpisodeAction(
 
                     return Unstar
                 }
+
                 RemoveListeningHistory.groupId -> {
                     if (selected.any { it is UserEpisode }) return null
 
@@ -176,13 +187,22 @@ sealed class MultiSelectEpisodeAction(
                     }
                     return if (hasPlayedAnyEpisode) RemoveListeningHistory else null
                 }
+
                 PlayNext.groupId -> return PlayNext
+
                 PlayLast.groupId -> return PlayLast
+
                 Share.groupId -> {
                     if (selected.size == 1 &&
                         selected.firstOrNull() is PodcastEpisode
                     ) {
                         return Share
+                    }
+                }
+
+                AddToPlaylist.groupId -> {
+                    if (selected.all { it is PodcastEpisode }) {
+                        return AddToPlaylist
                     }
                 }
             }

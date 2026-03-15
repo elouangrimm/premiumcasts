@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
-import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -21,7 +20,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.IntentCompat
-import androidx.core.graphics.drawable.toBitmap
 import androidx.core.view.isVisible
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -37,16 +35,14 @@ import androidx.media3.extractor.mp3.Mp3Extractor
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import au.com.shiftyjelly.pocketcasts.account.onboarding.OnboardingActivity
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.deeplink.CloudFilesDeepLink
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
-import au.com.shiftyjelly.pocketcasts.models.type.EpisodeStatusEnum
+import au.com.shiftyjelly.pocketcasts.models.type.EpisodeDownloadStatus
 import au.com.shiftyjelly.pocketcasts.models.type.UserEpisodeServerStatus
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.profile.R
 import au.com.shiftyjelly.pocketcasts.profile.databinding.ActivityAddFileBinding
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadHelper
 import au.com.shiftyjelly.pocketcasts.repositories.file.FileStorage
 import au.com.shiftyjelly.pocketcasts.repositories.playback.EpisodeFileMetadata
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
@@ -61,9 +57,16 @@ import au.com.shiftyjelly.pocketcasts.views.extensions.setSystemWindowInsetToPad
 import au.com.shiftyjelly.pocketcasts.views.extensions.setup
 import au.com.shiftyjelly.pocketcasts.views.helper.NavigationIcon
 import au.com.shiftyjelly.pocketcasts.views.helper.UiUtil
-import coil.imageLoader
-import coil.request.ImageRequest
-import coil.target.Target
+import coil3.Image
+import coil3.imageLoader
+import coil3.request.ImageRequest
+import coil3.target.Target
+import coil3.toBitmap
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.UpgradeBannerDismissedEvent
+import com.automattic.eventhorizon.UploadedFilesInvalidFileErrorEvent
+import com.automattic.eventhorizon.UploadedFilesUploadFailedEvent
+import com.automattic.eventhorizon.UserFileEditSaveEvent
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import java.io.FileOutputStream
@@ -145,7 +148,7 @@ class AddFileActivity :
 
     @Inject lateinit var settings: Settings
 
-    @Inject lateinit var analyticsTracker: AnalyticsTracker
+    @Inject lateinit var eventHorizon: EventHorizon
 
     private val viewModel: AddFileViewModel by viewModels()
 
@@ -236,7 +239,11 @@ class AddFileActivity :
 
         val upgradeLayout = binding.upgradeLayout.root
         upgradeLayout.findViewById<View>(R.id.btnClose).setOnClickListener {
-            analyticsTracker.track(AnalyticsEvent.UPGRADE_BANNER_DISMISSED, mapOf("source" to OnboardingUpgradeSource.FILES.analyticsValue))
+            eventHorizon.track(
+                UpgradeBannerDismissedEvent(
+                    source = SourceView.FILES.eventHorizonValue,
+                ),
+            )
             settings.setUpgradeClosedAddFile(true)
             upgradeLayout.isVisible = false
         }
@@ -420,11 +427,11 @@ class AddFileActivity :
 
     private fun loadImageFromUri(uri: Uri, isFile: Boolean = false) {
         val target = object : Target {
-            override fun onError(error: Drawable?) {
+            override fun onError(error: Image?) {
                 clearImageView()
             }
 
-            override fun onSuccess(result: Drawable) {
+            override fun onSuccess(result: Image) {
                 binding.btnImage.text = getString(LR.string.profile_files_remove_image)
                 bitmap = result.toBitmap()
                 binding.imgFileArtwork.setImageBitmap(bitmap)
@@ -468,10 +475,11 @@ class AddFileActivity :
     override fun onMenuItemClick(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.menu_save -> {
-                analyticsTracker.track(AnalyticsEvent.USER_FILE_EDIT_SAVE)
+                eventHorizon.track(UserFileEditSaveEvent)
                 saveFile()
                 true
             }
+
             else -> false
         }
     }
@@ -494,7 +502,11 @@ class AddFileActivity :
         }
 
         if (isUriInvalid(uri)) {
-            analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_INVALID_FILE_ERROR, mapOf("uri" to uri.toString()))
+            eventHorizon.track(
+                UploadedFilesInvalidFileErrorEvent(
+                    uri = uri.toString(),
+                ),
+            )
 
             Timber.e("Could not upload invalid file")
 
@@ -505,8 +517,7 @@ class AddFileActivity :
                 try {
                     val userEpisode = UserEpisode(uuid = uuid, publishedDate = Date(), fileType = intent.type)
 
-                    val savePath = DownloadHelper.pathForEpisode(userEpisode, fileStorage) ?: throw Exception("File path empty")
-                    val outFile = File(savePath)
+                    val outFile = fileStorage.getOrCreatePodcastEpisodeFile(userEpisode) ?: throw Exception("File path empty")
 
                     contentResolver.openInputStream(uri).use { inputStream ->
                         saveInputStreamToFile(outFile, inputStream)
@@ -514,7 +525,7 @@ class AddFileActivity :
                     val imageFile = saveBitmapToFile()
 
                     userEpisode.downloadedFilePath = outFile.absolutePath
-                    userEpisode.episodeStatus = EpisodeStatusEnum.DOWNLOADED
+                    userEpisode.downloadStatus = EpisodeDownloadStatus.Downloaded
                     userEpisode.title = binding.txtFilename.text.toString()
                     userEpisode.durationMs = length?.toInt() ?: 0
                     userEpisode.fileType = intentType
@@ -540,7 +551,11 @@ class AddFileActivity :
                         }
                     }
                 } catch (e: Exception) {
-                    analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_UPLOAD_FAILED, mapOf("uri" to uri.toString()))
+                    eventHorizon.track(
+                        UploadedFilesUploadFailedEvent(
+                            uri = uri.toString(),
+                        ),
+                    )
 
                     Timber.e(e, "Could not load file")
 

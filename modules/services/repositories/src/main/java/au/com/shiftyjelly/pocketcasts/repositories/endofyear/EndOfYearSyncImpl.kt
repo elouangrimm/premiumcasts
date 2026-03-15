@@ -1,13 +1,13 @@
 package au.com.shiftyjelly.pocketcasts.repositories.endofyear
 
+import au.com.shiftyjelly.pocketcasts.coroutines.CachedAction
+import au.com.shiftyjelly.pocketcasts.coroutines.run
 import au.com.shiftyjelly.pocketcasts.models.entity.UserPodcastRating
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.HistoryManager
 import au.com.shiftyjelly.pocketcasts.repositories.ratings.RatingsManager
 import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.servers.extensions.toDate
-import au.com.shiftyjelly.pocketcasts.utils.coroutines.CachedAction
-import au.com.shiftyjelly.pocketcasts.utils.coroutines.run
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -40,6 +40,7 @@ class EndOfYearSyncImpl @Inject constructor(
     override suspend fun sync(year: Year): Boolean {
         return when {
             isDataSynced() -> true
+
             canSyncData() -> supervisorScope {
                 val jobs = listOf(
                     thisYearSync.run(year, scope = this),
@@ -51,6 +52,7 @@ class EndOfYearSyncImpl @Inject constructor(
                     .onSuccess { timestampSetting.set(clock.instant(), updateModifiedAt = false) }
                     .getOrElse { error -> if (error !is CancellationException) false else throw error }
             }
+
             else -> false
         }
     }

@@ -3,21 +3,22 @@ package au.com.shiftyjelly.pocketcasts.repositories.images
 import android.content.Context
 import android.widget.ImageView
 import androidx.annotation.DrawableRes
-import androidx.annotation.Px
 import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.playback.EpisodeFileMetadata
 import au.com.shiftyjelly.pocketcasts.utils.Util
 import au.com.shiftyjelly.pocketcasts.utils.extensions.dpToPx
-import au.com.shiftyjelly.pocketcasts.utils.images.RoundedCornersTransformation
-import coil.imageLoader
-import coil.request.ErrorResult
-import coil.request.ImageRequest
-import coil.request.SuccessResult
-import coil.target.Target
-import coil.transform.Transformation
+import coil3.imageLoader
+import coil3.request.ErrorResult
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.error
+import coil3.request.placeholder
+import coil3.request.target
+import coil3.request.transformations
+import coil3.transform.RoundedCornersTransformation
+import coil3.transform.Transformation
 import java.io.File
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import au.com.shiftyjelly.pocketcasts.images.R as IR
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast as PodcastEntity
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode as PodcastEpisodeEntity
@@ -26,13 +27,14 @@ import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode as UserEpisodeEn
 data class PocketCastsImageRequestFactory(
     val context: Context,
     private val isDarkTheme: Boolean = false,
-    @Px private val cornerRadius: Int = 0,
-    @Px private val size: Int? = null,
+    private val cornerRadius: Int = 0,
+    private val size: Int? = null,
     private val placeholderType: PlaceholderType = PlaceholderType.Large,
     private val transformations: List<Transformation> = emptyList(),
+    private val showErrorPlaceholder: Boolean = true,
 ) {
     private val actualCornerRadius = cornerRadius.dpToPx(context)
-    private val actualSize = size?.dpToPx(context)
+    private val actualSize = size?.dpToPx(context)?.takeIf { it > 0 }
 
     fun smallSize() = copy(size = 128)
 
@@ -65,8 +67,8 @@ data class PocketCastsImageRequestFactory(
         onSuccess: () -> Unit,
     ) = ImageRequest.Builder(context)
         .data(type.data(context))
-        .placeholder(placeholderId)
-        .error(if (isDarkTheme) IR.drawable.defaultartwork_dark else IR.drawable.defaultartwork)
+        .let { if (placeholderType == PlaceholderType.None) it else it.placeholder(placeholderId) }
+        .let { if (showErrorPlaceholder) it.error(if (isDarkTheme) IR.drawable.defaultartwork_dark else IR.drawable.defaultartwork) else it }
         .transformations(
             buildList {
                 add(RoundedCornersTransformation(actualCornerRadius.toFloat()))
@@ -88,7 +90,7 @@ data class PocketCastsImageRequestFactory(
         is RequestType.Podcast -> data(context)
         is RequestType.PodcastEpisode -> data(context)
         is RequestType.UserEpisode -> data()
-        is RequestType.FileOrUrl -> filePathOrUrl.toHttpUrlOrNull() ?: File(filePathOrUrl)
+        is RequestType.FileOrUrl -> filePathOrUrl
     }
 
     private fun RequestType.Podcast.data(context: Context) = podcastUuid?.let { podcastArtworkUrl(context, it) } ?: placeholderId
@@ -124,18 +126,12 @@ data class PocketCastsImageRequestFactory(
     }
 
     private fun podcastArtworkUrl(context: Context, podcastUuid: String): String {
-        val maxSize = if (Util.isWearOs(context)) 480 else 960
-        val urlSize = when {
-            actualSize == null -> maxSize
-            actualSize > 480 -> maxSize
-            actualSize > 200 -> 480
-            else -> 200
-        }
-        return "${Settings.SERVER_STATIC_URL}/discover/images/webp/$urlSize/$podcastUuid.webp"
+        return PodcastImage.getArtworkUrl(size = actualSize, uuid = podcastUuid, isWearOS = Util.isWearOs(context))
     }
 
     private fun RequestType.listener(context: Context, onSuccess: () -> Unit): ImageRequest.Listener? = when (this) {
         is RequestType.PodcastEpisode -> RetryWithPodcastListener(episode.podcastArtworkUrl(context), onSuccess)
+
         else -> object : ImageRequest.Listener {
             override fun onSuccess(request: ImageRequest, result: SuccessResult) = onSuccess()
         }
@@ -149,8 +145,6 @@ data class PocketCastsImageRequestFactory(
 }
 
 fun ImageRequest.loadInto(view: ImageView) = context.imageLoader.enqueue(newBuilder().target(view).build())
-
-fun ImageRequest.loadInto(target: Target) = context.imageLoader.enqueue(newBuilder().target(target).build())
 
 private sealed interface RequestType {
     data class Podcast(val podcastUuid: String?) : RequestType

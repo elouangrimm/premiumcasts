@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.StringRes
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
@@ -33,6 +34,7 @@ import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
 import au.com.shiftyjelly.pocketcasts.ui.theme.ThemeColor
 import au.com.shiftyjelly.pocketcasts.utils.extensions.requireParcelable
 import au.com.shiftyjelly.pocketcasts.views.fragments.BaseDialogFragment
+import com.automattic.eventhorizon.EpisodeTabType
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.tabs.TabLayoutMediator
@@ -98,7 +100,8 @@ class EpisodeContainerFragment :
 
     override val includeNavigationBarPadding: Boolean = false
 
-    var binding: FragmentEpisodeContainerBinding? = null
+    private var binding: FragmentEpisodeContainerBinding? = null
+    private var snackBarView: CoordinatorLayout? = null
 
     private val args get() = requireArguments().requireParcelable<EpisodeFragmentArgs>(NEW_INSTANCE_ARG)
 
@@ -156,6 +159,9 @@ class EpisodeContainerFragment :
         savedInstanceState: Bundle?,
     ): View? {
         binding = FragmentEpisodeContainerBinding.inflate(inflater, container, false)
+        snackBarView = CoordinatorLayout(ContextThemeWrapper(context, activeTheme.resourceId)).also {
+            binding?.root?.addView(it)
+        }
         return binding?.root
     }
 
@@ -188,6 +194,8 @@ class EpisodeContainerFragment :
 
         binding.btnClose.setOnClickListener { dismiss() }
     }
+
+    override fun snackBarView() = snackBarView
 
     private fun FragmentEpisodeContainerBinding.setupViewPager() {
         // HACK to fix bottom sheet drag, https://issuetracker.google.com/issues/135517665
@@ -222,7 +230,7 @@ class EpisodeContainerFragment :
                 super.onPageSelected(position)
                 btnFav.isVisible = adapter.isDetailsTab(position)
                 btnShare.isVisible = adapter.isDetailsTab(position)
-                viewModel.onPageSelected(adapter.pageKey(position))
+                viewModel.onPageSelected(adapter.tabType(position))
             }
         })
 
@@ -263,6 +271,7 @@ class EpisodeContainerFragment :
     override fun onDestroyView() {
         super.onDestroyView()
         binding = null
+        snackBarView = null
         with(bookmarksViewModel.multiSelectHelper) {
             isMultiSelecting = false
             context = null
@@ -285,10 +294,22 @@ class EpisodeContainerFragment :
         val indexOfBookmarks: Int
             get() = sections.indexOf(Section.Bookmarks)
 
-        private sealed class Section(@StringRes val titleRes: Int, val analyticsValue: String) {
-            data object Details : Section(LR.string.details, "details")
-            data object Chapters : Section(LR.string.chapters, "chapters")
-            data object Bookmarks : Section(LR.string.bookmarks, "bookmarks")
+        private sealed class Section(
+            @StringRes val titleRes: Int,
+            val eventHorizonValue: EpisodeTabType,
+        ) {
+            data object Details : Section(
+                titleRes = LR.string.details,
+                eventHorizonValue = EpisodeTabType.Details,
+            )
+            data object Chapters : Section(
+                titleRes = LR.string.chapters,
+                eventHorizonValue = EpisodeTabType.Chapters,
+            )
+            data object Bookmarks : Section(
+                titleRes = LR.string.bookmarks,
+                eventHorizonValue = EpisodeTabType.Bookmarks,
+            )
         }
 
         private var sections = listOf(
@@ -342,11 +363,13 @@ class EpisodeContainerFragment :
                             forceDark = forceDarkTheme,
                             autoPlay = autoPlay,
                         )
+
                 Section.Bookmarks -> BookmarksFragment.newInstance(
                     sourceView = SourceView.EPISODE_DETAILS,
                     episodeUuid = requireNotNull(episodeUUID),
                     forceDarkTheme = forceDarkTheme,
                 )
+
                 Section.Chapters -> ChaptersFragment.forEpisode(
                     episodeUuid = requireNotNull(episodeUUID),
                 )
@@ -358,7 +381,7 @@ class EpisodeContainerFragment :
             return sections[position].titleRes
         }
 
-        fun pageKey(position: Int) = sections[position].analyticsValue
+        fun tabType(position: Int) = sections[position].eventHorizonValue
 
         fun isDetailsTab(position: Int) = sections[position] is Section.Details
     }

@@ -4,13 +4,12 @@ package au.com.shiftyjelly.pocketcasts.podcasts.viewmodel.notifications
 
 import app.cash.turbine.test
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.testing.TestEventSink
 import au.com.shiftyjelly.pocketcasts.models.type.SignInState
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.UserSetting
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
-import au.com.shiftyjelly.pocketcasts.sharedtest.InMemoryFeatureFlagRule
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
+import com.automattic.eventhorizon.EventHorizon
 import io.reactivex.Flowable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -44,18 +43,11 @@ class MainDispatcherRule(
 }
 
 class EnableNotificationsPromptViewModelTest {
-
-    @get:Rule
-    val featureFlagRule = InMemoryFeatureFlagRule()
-
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
 
     @Mock
     lateinit var settings: Settings
-
-    @Mock
-    lateinit var analyticsTracker: AnalyticsTracker
 
     @Mock
     lateinit var userManager: UserManager
@@ -68,20 +60,7 @@ class EnableNotificationsPromptViewModelTest {
     }
 
     @Test
-    fun `should return old state when ff is disabled`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, false)
-
-        createViewModel().stateFlow.test {
-            val state = awaitItem()
-
-            assert(state is EnableNotificationsPromptViewModel.UiState.PreNewOnboarding)
-        }
-    }
-
-    @Test
     fun `should return new state with defaults when ff is enabled`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, true)
-
         val viewModel = createViewModel()
         advanceUntilIdle()
 
@@ -94,7 +73,6 @@ class EnableNotificationsPromptViewModelTest {
 
     @Test
     fun `should return new state without newsletter when ff is enabled and user is not signed in`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, true)
         whenever(userManager.getSignInState()).thenReturn(Flowable.just(SignInState.SignedOut))
 
         val viewModel = createViewModel()
@@ -109,7 +87,6 @@ class EnableNotificationsPromptViewModelTest {
 
     @Test
     fun `should return new state without newsletter when ff is enabled and user has already subscribed to newsletter`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, true)
         whenever(settings.marketingOptIn).thenReturn(UserSetting.Mock(initialValue = true, mock()))
 
         val viewModel = createViewModel()
@@ -124,8 +101,6 @@ class EnableNotificationsPromptViewModelTest {
 
     @Test
     fun `should update state when newsletter changes`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, true)
-
         val viewModel = createViewModel()
         advanceUntilIdle()
         viewModel.changeNewsletterSubscription(false)
@@ -139,8 +114,6 @@ class EnableNotificationsPromptViewModelTest {
 
     @Test
     fun `should update state when notification setting changes`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, true)
-
         val viewModel = createViewModel()
         advanceUntilIdle()
 
@@ -154,23 +127,7 @@ class EnableNotificationsPromptViewModelTest {
     }
 
     @Test
-    fun `should send message to request notifications when ff is off`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, false)
-
-        val viewModel = createViewModel()
-        advanceUntilIdle()
-
-        viewModel.messagesFlow.test {
-            viewModel.handleCtaClick()
-            val message = awaitItem()
-            assertEquals(EnableNotificationsPromptViewModel.UiMessage.RequestPermission, message)
-        }
-    }
-
-    @Test
     fun `should send message to request notifications when ff is on and notifications are enabled`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, true)
-
         val viewModel = createViewModel()
         advanceUntilIdle()
 
@@ -183,8 +140,6 @@ class EnableNotificationsPromptViewModelTest {
 
     @Test
     fun `should send message to dismiss when ff is on and notifications are disabled`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION, true)
-
         val viewModel = createViewModel()
         advanceUntilIdle()
 
@@ -198,7 +153,8 @@ class EnableNotificationsPromptViewModelTest {
 
     private fun createViewModel() = EnableNotificationsPromptViewModel(
         settings = settings,
-        analyticsTracker = analyticsTracker,
+        analyticsTracker = AnalyticsTracker.test(),
+        eventHorizon = EventHorizon(TestEventSink()),
         userManager = userManager,
     )
 }

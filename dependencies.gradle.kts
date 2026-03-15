@@ -99,12 +99,23 @@ project.apply {
         // Secrets
         set("settingsEncryptSecret", secretProperties.getProperty("pocketcastsSettingsEncryptSecret", ""))
         set("sharingServerSecret", secretProperties.getProperty("pocketcastsSharingServerSecret", ""))
-        set("pocketcastsSentryDsn", secretProperties.getProperty("pocketcastsSentryDsn", ""))
+        val sentryAndroidDsn = secretProperties.getProperty("sentryAndroidDsn", "")
+        val sentryDsn = when {
+            isAutomotiveBuild -> secretProperties.getProperty("sentryAutomotiveDsn", "").ifBlank { sentryAndroidDsn }
+            isWearBuild -> secretProperties.getProperty("sentryWearDsn", "").ifBlank { sentryAndroidDsn }
+            else -> sentryAndroidDsn
+        }
+        set("pocketcastsSentryDsn", sentryDsn)
         set("googleSignInServerClientId", secretProperties.getProperty("googleSignInServerClientId", ""))
         set("measureBuildsEnabled", secretProperties.getProperty("measureBuildsEnabled", ""))
         set("appsMetricsToken", secretProperties.getProperty("appsMetricsToken", ""))
         set("encryptionKey", secretProperties.getProperty("encryption_key", ""))
         set("appSecret", secretProperties.getProperty("app_secret", ""))
         set("metaAppId", secretProperties.getProperty("metaAppId", ""))
+        set("sentryAuthToken", secretProperties.getProperty("sentryAuthToken", ""))
+        set("sentryOrg", secretProperties.getProperty("sentryOrg", ""))
+        set("sentryAndroidProject", secretProperties.getProperty("sentryAndroidProject", ""))
+        set("sentryAutomotiveProject", secretProperties.getProperty("sentryAutomotiveProject", ""))
+        set("sentryWearProject", secretProperties.getProperty("sentryWearProject", ""))
     }
 }

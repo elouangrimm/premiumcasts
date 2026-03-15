@@ -2,6 +2,7 @@ package au.com.shiftyjelly.pocketcasts.repositories.podcast
 
 import android.content.Context
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.models.db.AppDatabase
 import au.com.shiftyjelly.pocketcasts.models.entity.CuratedPodcast
 import au.com.shiftyjelly.pocketcasts.models.entity.Folder
@@ -13,14 +14,12 @@ import au.com.shiftyjelly.pocketcasts.models.to.AutoArchiveInactive
 import au.com.shiftyjelly.pocketcasts.models.to.AutoArchiveLimit
 import au.com.shiftyjelly.pocketcasts.models.to.PlaybackEffects
 import au.com.shiftyjelly.pocketcasts.models.to.PodcastGrouping
-import au.com.shiftyjelly.pocketcasts.models.type.EpisodeStatusEnum
+import au.com.shiftyjelly.pocketcasts.models.type.EpisodeDownloadStatus
 import au.com.shiftyjelly.pocketcasts.models.type.EpisodesSortType
 import au.com.shiftyjelly.pocketcasts.models.type.PodcastsSortType
 import au.com.shiftyjelly.pocketcasts.models.type.TrimMode
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadHelper
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadManager
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadQueue
 import au.com.shiftyjelly.pocketcasts.repositories.extensions.getUrlForArtwork
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
 import au.com.shiftyjelly.pocketcasts.repositories.refresh.RefreshPodcastsTask
@@ -30,8 +29,6 @@ import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.servers.refresh.RefreshServiceManager
 import au.com.shiftyjelly.pocketcasts.servers.refresh.UpdatePodcastResponse.EpisodeFound
 import au.com.shiftyjelly.pocketcasts.servers.refresh.UpdatePodcastResponse.Retry
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import com.jakewharton.rxrelay2.PublishRelay
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -59,13 +56,13 @@ import timber.log.Timber
 
 class PodcastManagerImpl @Inject constructor(
     private val episodeManager: EpisodeManager,
-    private val smartPlaylistManager: SmartPlaylistManager,
     private val settings: Settings,
     @ApplicationContext private val context: Context,
     private val subscribeManager: SubscribeManager,
     private val refreshServiceManager: RefreshServiceManager,
     private val syncManager: SyncManager,
     private val podcastRefresher: PodcastRefresher,
+    private val downloadQueue: DownloadQueue,
     @ApplicationScope private val applicationScope: CoroutineScope,
     appDatabase: AppDatabase,
 ) : PodcastManager,
@@ -83,10 +80,9 @@ class PodcastManagerImpl @Inject constructor(
     private val episodeDao = appDatabase.episodeDao()
     private val playlistDao = appDatabase.playlistDao()
 
-    override suspend fun unsubscribe(podcastUuid: String, playbackManager: PlaybackManager) {
+    override suspend fun unsubscribe(podcastUuid: String, sourceView: SourceView) {
         try {
             val podcast = podcastDao.findPodcastByUuid(podcastUuid) ?: return
-            val episodes = episodeManager.findEpisodesByPodcastOrderedSuspend(podcast)
 
             podcast.isSubscribed = false
             podcast.syncStatus = Podcast.SYNC_STATUS_NOT_SYNCED
@@ -99,9 +95,7 @@ class PodcastManagerImpl @Inject constructor(
             podcast.overrideGlobalArchive = false
             podcast.folderUuid = null
             podcastDao.updateSuspend(podcast)
-
-            episodeManager.deleteEpisodeFilesAsync(episodes, playbackManager)
-            smartPlaylistManager.removePodcastFromPlaylists(podcastUuid)
+            downloadQueue.cancelAll(podcast.uuid, sourceView)
 
             unsubscribeRelay.accept(podcastUuid)
         } catch (t: Throwable) {
@@ -109,9 +103,9 @@ class PodcastManagerImpl @Inject constructor(
         }
     }
 
-    override fun unsubscribeAsync(podcastUuid: String, playbackManager: PlaybackManager) {
+    override fun unsubscribeAsync(podcastUuid: String, sourceView: SourceView) {
         launch {
-            unsubscribe(podcastUuid, playbackManager)
+            unsubscribe(podcastUuid, sourceView)
         }
     }
 
@@ -276,7 +270,7 @@ class PodcastManagerImpl @Inject constructor(
             return false
         }
         if (deleteEpisodes.isNotEmpty()) {
-            episodeManager.deleteEpisodesWithoutSyncBlocking(deleteEpisodes, playbackManager)
+            runBlocking { episodeManager.deleteAllEpisodes(deleteEpisodes, SourceView.UNKNOWN) }
         }
         if (!podcastHasChangedEpisodes) {
             LogBuffer.i(LogBuffer.TAG_BACKGROUND_TASKS, "Removing unused podcast ${podcast.title}")
@@ -351,7 +345,9 @@ class PodcastManagerImpl @Inject constructor(
         return when (sortType) {
             // use a query to get the podcasts ordered by episode release date or recently played episodes
             PodcastsSortType.EPISODE_DATE_NEWEST_TO_OLDEST -> findPodcastsOrderByLatestEpisode(orderAsc = false)
+
             PodcastsSortType.RECENTLY_PLAYED -> findPodcastsOrderByRecentlyPlayedEpisode()
+
             else -> podcastDao.findSubscribedNoOrder().sortedWith(sortType.podcastComparator)
         }
     }
@@ -436,7 +432,7 @@ class PodcastManagerImpl @Inject constructor(
     }
 
     override fun clearAllDownloadErrorsBlocking() {
-        episodeDao.clearAllDownloadErrorsBlocking(EpisodeStatusEnum.NOT_DOWNLOADED, EpisodeStatusEnum.DOWNLOAD_FAILED)
+        episodeDao.clearAllDownloadErrorsBlocking(EpisodeDownloadStatus.DownloadNotRequested, EpisodeDownloadStatus.DownloadFailed)
     }
 
     /**
@@ -445,6 +441,10 @@ class PodcastManagerImpl @Inject constructor(
      */
     override fun countPodcastsBlocking(): Int {
         return podcastDao.countBlocking()
+    }
+
+    override suspend fun countPodcasts(): Int {
+        return podcastDao.count()
     }
 
     override suspend fun countSubscribed(): Int {
@@ -487,6 +487,14 @@ class PodcastManagerImpl @Inject constructor(
     override suspend fun updateAutoDownload(podcastUuids: Collection<String>, isEnabled: Boolean) {
         val status = if (isEnabled) Podcast.AUTO_DOWNLOAD_NEW_EPISODES else Podcast.AUTO_DOWNLOAD_OFF
         podcastDao.updateAutoDownloadStatus(podcastUuids, status)
+        if (isEnabled) {
+            settings.autoDownloadNewEpisodes.set(Podcast.AUTO_DOWNLOAD_NEW_EPISODES, updateModifiedAt = true)
+        } else {
+            val podcasts = podcastDao.findSubscribedNoOrder()
+            if (podcasts.none { it.isAutoDownloadNewEpisodes }) {
+                settings.autoDownloadNewEpisodes.set(Podcast.AUTO_DOWNLOAD_OFF, updateModifiedAt = true)
+            }
+        }
     }
 
     override suspend fun updateAllShowNotifications(showNotifications: Boolean) {
@@ -498,6 +506,14 @@ class PodcastManagerImpl @Inject constructor(
 
     override fun updateAutoDownloadStatusBlocking(podcast: Podcast, autoDownloadStatus: Int) {
         podcastDao.updateAutoDownloadStatusBlocking(autoDownloadStatus, podcast.uuid)
+        if (autoDownloadStatus == Podcast.AUTO_DOWNLOAD_NEW_EPISODES) {
+            settings.autoDownloadNewEpisodes.set(Podcast.AUTO_DOWNLOAD_NEW_EPISODES, updateModifiedAt = true)
+        } else {
+            val podcasts = podcastDao.findSubscribedBlocking()
+            if (podcasts.none { it.isAutoDownloadNewEpisodes }) {
+                settings.autoDownloadNewEpisodes.set(Podcast.AUTO_DOWNLOAD_OFF, updateModifiedAt = true)
+            }
+        }
     }
 
     override suspend fun updateAutoAddToUpNext(podcast: Podcast, autoAddToUpNext: Podcast.AutoAddUpNext) {
@@ -574,57 +590,7 @@ class PodcastManagerImpl @Inject constructor(
         podcastDao.updateLatestEpisodeBlocking(latestEpisode.uuid, latestEpisode.publishedDate, podcastUuid = podcast.uuid)
     }
 
-    override fun checkForEpisodesToDownloadBlocking(episodeUuidsAdded: List<String>, downloadManager: DownloadManager) {
-        Timber.i("Auto download podcasts checkForEpisodesToDownload. Episodes %s", episodeUuidsAdded.size)
-
-        val podcastUuidToAutoDownload = HashMap<String, Boolean>()
-        val podcastUuidToDownloadCount = HashMap<String, Int>()
-
-        for (podcast in findSubscribedBlocking()) {
-            podcastUuidToAutoDownload[podcast.uuid] = podcast.isAutoDownloadNewEpisodes
-        }
-
-        val uuidToAdded = HashMap<String, Boolean>()
-        for (episodeUuid in episodeUuidsAdded) {
-            val episode = runBlocking {
-                episodeManager.findByUuid(episodeUuid)
-            } ?: continue
-            val autoDownload = podcastUuidToAutoDownload[episode.podcastUuid]
-            Timber.i(
-                "Auto download " + episode.title +
-                    " autoDownload: " + (autoDownload?.toString() ?: "null") +
-                    " isQueued: " + episode.isQueued +
-                    " isDownloaded: " + episode.isDownloaded +
-                    " isDownloading: " + episode.isDownloading +
-                    " isFinished: " + episode.isFinished,
-            )
-
-            if (autoDownload == null ||
-                !autoDownload ||
-                episode.isQueued ||
-                episode.isDownloaded ||
-                episode.isDownloading ||
-                episode.isFinished ||
-                episode.isArchived ||
-                episode.isExemptFromAutoDownload
-            ) {
-                continue
-            }
-
-            val currentDownloadCount = podcastUuidToDownloadCount.getOrDefault(episode.podcastUuid, 0)
-            if (currentDownloadCount >= settings.autoDownloadLimit.value.episodeCount) {
-                continue // Skip to the next episode since it already downloaded the limit of episodes for this podcast
-            }
-
-            DownloadHelper.addAutoDownloadedEpisodeToQueue(episode, "podcast auto download " + episode.podcastUuid, downloadManager, episodeManager, source = SourceView.UNKNOWN)
-            uuidToAdded[episodeUuid] = java.lang.Boolean.TRUE
-
-            // Update the track of how many episodes were downloaded for this podcast
-            podcastUuidToDownloadCount[episode.podcastUuid] = currentDownloadCount + 1
-        }
-    }
-
-    override fun countEpisodesInPodcastWithStatusBlocking(podcastUuid: String, episodeStatus: EpisodeStatusEnum): Int {
+    override fun countEpisodesInPodcastWithStatusBlocking(podcastUuid: String, episodeStatus: EpisodeDownloadStatus): Int {
         return podcastDao.countEpisodesInPodcastWithStatusBlocking(podcastUuid, episodeStatus)
     }
 
@@ -713,11 +679,7 @@ class PodcastManagerImpl @Inject constructor(
     }
 
     private suspend fun isPodcastInManualPlaylist(podcast: Podcast): Boolean {
-        val podcastsInPlaylists = if (FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true)) {
-            playlistDao.getPodcastsAddedToManualPlaylists()
-        } else {
-            emptyList()
-        }
+        val podcastsInPlaylists = playlistDao.getPodcastsAddedToManualPlaylists()
         return podcast.uuid in podcastsInPlaylists
     }
 }

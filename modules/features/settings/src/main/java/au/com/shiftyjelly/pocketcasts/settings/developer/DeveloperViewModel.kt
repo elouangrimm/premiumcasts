@@ -4,6 +4,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.model.AppReviewReason
 import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewManagerImpl
@@ -13,6 +14,8 @@ import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.SuggestedFoldersManager
 import com.automattic.android.tracks.crashlogging.CrashLogging
+import com.google.android.play.core.ktx.requestReview
+import com.google.android.play.core.review.testing.FakeReviewManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -38,6 +41,7 @@ class DeveloperViewModel
     private val crashLogging: CrashLogging,
     private val appReviewManagerImpl: AppReviewManagerImpl,
 ) : ViewModel() {
+    private val reviewManager = FakeReviewManager(context)
 
     fun forceRefresh() {
         podcastManager.refreshPodcasts(fromLog = "dev")
@@ -67,7 +71,7 @@ class DeveloperViewModel
                                 // remove the latest episode
                                 val episodeToDelete = episodes[0]
                                 Timber.i("Creating a notification for ${podcast.title} - ${episodeToDelete.title}")
-                                episodeManager.deleteEpisodeWithoutSyncBlocking(episodeToDelete, playbackManager)
+                                episodeManager.deleteAllEpisodes(setOf(episodeToDelete), SourceView.UNKNOWN)
                                 settings.setNotificationLastSeenToNow()
                                 continue
                             }
@@ -101,7 +105,7 @@ class DeveloperViewModel
                         val episodeToDelete = episodes.first()
                         val newLatest = episodes.getOrNull(1)
                         Timber.i("Deleted episode ${podcast.title} - ${episodeToDelete.title}")
-                        episodeManager.deleteEpisodeWithoutSyncBlocking(episodeToDelete, playbackManager)
+                        episodeManager.deleteAllEpisodes(setOf(episodeToDelete), SourceView.UNKNOWN)
 
                         podcast.latestEpisodeUuid = newLatest?.uuid
                         podcast.latestEpisodeDate = newLatest?.publishedDate
@@ -182,7 +186,28 @@ class DeveloperViewModel
 
     fun showAppReviewPrompt() {
         viewModelScope.launch {
-            appReviewManagerImpl.triggerPrompt(AppReviewReason.DevelopmentTrigger)
+            val reviewInfo = reviewManager.requestReview()
+            appReviewManagerImpl.triggerPrompt(AppReviewReason.DevelopmentTrigger, reviewInfo)
+        }
+    }
+
+    fun clearAppReviewSettings() {
+        with(settings) {
+            appReviewEpisodeCompletedTimestamps.set(emptyList(), updateModifiedAt = false)
+            appReviewEpisodeStarredTimestamp.set(null, updateModifiedAt = false)
+            appReviewPodcastRatedTimestamp.set(null, updateModifiedAt = false)
+            appReviewPlaylistCreatedTimestamp.set(null, updateModifiedAt = false)
+            appReviewPlusUpgradedTimestamp.set(null, updateModifiedAt = false)
+            appReviewFolderCreatedTimestamp.set(null, updateModifiedAt = false)
+            appReviewBookmarkCreatedTimestamp.set(null, updateModifiedAt = false)
+            appReviewThemeChangedTimestamp.set(null, updateModifiedAt = false)
+            appReviewReferralSharedTimestamp.set(null, updateModifiedAt = false)
+            appReviewEndOfYearSharedTimestamp.set(null, updateModifiedAt = false)
+            appReviewEndOfYearCompletedTimestamp.set(null, updateModifiedAt = false)
+            appReviewLastPromptTimestamp.set(null, updateModifiedAt = false)
+            appReviewLastDeclineTimestamps.set(emptyList(), updateModifiedAt = false)
+            appReviewCrashTimestamp.set(null, updateModifiedAt = false)
+            appReviewSubmittedReasons.set(emptyList(), updateModifiedAt = false)
         }
     }
 }

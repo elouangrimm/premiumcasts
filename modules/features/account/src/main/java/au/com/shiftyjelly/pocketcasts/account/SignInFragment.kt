@@ -54,7 +54,7 @@ class SignInFragment : BaseFragment() {
 
         viewModel.clearValues()
 
-        txtEmail.setText(viewModel.email.value?.toString())
+        txtEmail.setText(viewModel.email.value)
         txtEmail.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 txtPwd.requestFocus()
@@ -85,6 +85,7 @@ class SignInFragment : BaseFragment() {
                 is SignInState.Empty -> {
                     updateForm(invalidEmail = false, invalidPwd = false, loading = false)
                 }
+
                 is SignInState.Failure -> {
                     progress.isVisible = false
 
@@ -101,12 +102,14 @@ class SignInFragment : BaseFragment() {
                         viewModel.clearServerError()
                     }
                 }
+
                 is SignInState.Loading -> {
                     txtError.text = ""
                     progress.isVisible = true
 
                     updateForm(invalidEmail = false, invalidPwd = false, loading = true)
                 }
+
                 is SignInState.Success -> {
                     progress.isVisible = false
                     if (findNavController().graph.startDestinationId == R.id.promoCodeFragment) {

@@ -1,17 +1,16 @@
 package au.com.shiftyjelly.pocketcasts.repositories.sync
 
 import android.os.SystemClock
+import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.models.db.AppDatabase
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
+import au.com.shiftyjelly.pocketcasts.models.type.EpisodeDownloadStatus
 import au.com.shiftyjelly.pocketcasts.models.type.EpisodePlayingStatus
-import au.com.shiftyjelly.pocketcasts.models.type.EpisodeStatusEnum
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.servers.podcast.PodcastCacheServiceManager
 import au.com.shiftyjelly.pocketcasts.utils.DateUtil
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import com.automattic.android.tracks.crashlogging.CrashLogging
 import java.util.Calendar
@@ -39,15 +38,6 @@ class PodcastRefresherImpl @Inject constructor(
 
             val startTime = SystemClock.elapsedRealtime()
 
-            val originalPodcast = existingPodcast.copy()
-            existingPodcast.title = updatedPodcast.title
-            existingPodcast.author = updatedPodcast.author
-            existingPodcast.podcastCategory = updatedPodcast.podcastCategory
-            existingPodcast.podcastDescription = updatedPodcast.podcastDescription
-            existingPodcast.estimatedNextEpisode = updatedPodcast.estimatedNextEpisode
-            existingPodcast.episodeFrequency = updatedPodcast.episodeFrequency
-            existingPodcast.refreshAvailable = updatedPodcast.refreshAvailable
-            existingPodcast.fundingUrl = updatedPodcast.fundingUrl
             val existingEpisodes = episodeManager.findEpisodesByPodcastOrderedByPublishDate(existingPodcast)
             val mostRecentEpisode = existingEpisodes.firstOrNull()
             val insertEpisodes = mutableListOf<PodcastEpisode>()
@@ -69,6 +59,7 @@ class PodcastRefresherImpl @Inject constructor(
                     existingEpisode.season = newEpisode.season
                     existingEpisode.number = newEpisode.number
                     existingEpisode.type = newEpisode.type
+                    existingEpisode.hasGeneratedTranscript = newEpisode.hasGeneratedTranscript
                     // only update the db if the fields have changed
                     if (originalEpisode != existingEpisode) {
                         episodeManager.update(existingEpisode)
@@ -77,7 +68,7 @@ class PodcastRefresherImpl @Inject constructor(
                     // don't add anything newer than the latest episode so it runs through the refresh logic (auto download, auto add to Up Next etc
                     if (!existingPodcast.isSubscribed || (mostRecentEpisode != null && newEpisode.publishedDate.before(mostRecentEpisode.publishedDate))) {
                         newEpisode.podcastUuid = existingPodcast.uuid
-                        newEpisode.episodeStatus = EpisodeStatusEnum.NOT_DOWNLOADED
+                        newEpisode.downloadStatus = EpisodeDownloadStatus.DownloadNotRequested
                         newEpisode.playingStatus = EpisodePlayingStatus.NOT_PLAYED
 
                         // for podcast you're subscribed to, if we find episodes older than a week, we add them in as archived so they don't flood your filters, etc
@@ -108,11 +99,7 @@ class PodcastRefresherImpl @Inject constructor(
             val twoWeeksAgo = Calendar.getInstance()
                 .apply { add(Calendar.DAY_OF_MONTH, -14) }
                 .time
-            val episodesInPlaylists = if (FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true)) {
-                playlistDao.getEpisodesAddedToManualPlaylists()
-            } else {
-                emptyList()
-            }
+            val episodesInPlaylists = playlistDao.getEpisodesAddedToManualPlaylists()
             val episodesToDelete = existingEpisodes
                 .map(PodcastEpisode::uuid)
                 .subtract(updatedPodcast.episodes.mapTo(mutableSetOf(), PodcastEpisode::uuid))
@@ -121,18 +108,40 @@ class PodcastRefresherImpl @Inject constructor(
                     it.addedDate.before(twoWeeksAgo) && episodeManager.episodeCanBeCleanedUp(it, playbackManager) && it.uuid !in episodesInPlaylists
                 }
             if (episodesToDelete.isNotEmpty()) {
-                episodeManager.deleteEpisodesWithoutSync(episodesToDelete, playbackManager)
+                episodeManager.deleteAllEpisodes(episodesToDelete, SourceView.UNKNOWN)
             }
 
-            if (originalPodcast != existingPodcast) {
-                LogBuffer.i(LogBuffer.TAG_BACKGROUND_TASKS, "Refresh required update for podcast ${existingPodcast.uuid}")
-                appDatabase.podcastDao().updateSuspend(existingPodcast)
-            }
+            updatePodcastIfRequired(existingPodcast, updatedPodcast)
 
             LogBuffer.i(LogBuffer.TAG_BACKGROUND_TASKS, "Refreshing podcast ${existingPodcast.uuid} - ${String.format(Locale.ENGLISH, "%d ms", SystemClock.elapsedRealtime() - startTime)}")
         } catch (e: Exception) {
             LogBuffer.e(LogBuffer.TAG_BACKGROUND_TASKS, e, "Error refreshing podcast ${existingPodcast.uuid} in background")
             crashLogging.sendReport(e)
+        }
+    }
+
+    internal suspend fun updatePodcastIfRequired(existingPodcast: Podcast, updatedPodcast: Podcast) {
+        if (existingPodcast.title != updatedPodcast.title ||
+            existingPodcast.author != updatedPodcast.author ||
+            existingPodcast.podcastCategory != updatedPodcast.podcastCategory ||
+            existingPodcast.podcastDescription != updatedPodcast.podcastDescription ||
+            existingPodcast.estimatedNextEpisode != updatedPodcast.estimatedNextEpisode ||
+            existingPodcast.episodeFrequency != updatedPodcast.episodeFrequency ||
+            existingPodcast.refreshAvailable != updatedPodcast.refreshAvailable ||
+            existingPodcast.fundingUrl != updatedPodcast.fundingUrl
+        ) {
+            LogBuffer.i(LogBuffer.TAG_BACKGROUND_TASKS, "Refresh required update for podcast ${existingPodcast.uuid}")
+            appDatabase.podcastDao().updateRefresh(
+                uuid = existingPodcast.uuid,
+                title = updatedPodcast.title,
+                author = updatedPodcast.author,
+                podcastCategory = updatedPodcast.podcastCategory,
+                podcastDescription = updatedPodcast.podcastDescription,
+                estimatedNextEpisode = updatedPodcast.estimatedNextEpisode,
+                episodeFrequency = updatedPodcast.episodeFrequency,
+                refreshAvailable = updatedPodcast.refreshAvailable,
+                fundingUrl = updatedPodcast.fundingUrl,
+            )
         }
     }
 }

@@ -1,5 +1,7 @@
 package au.com.shiftyjelly.pocketcasts.settings.onboarding
 
+import com.automattic.eventhorizon.OnboardingSource
+
 enum class OnboardingUpgradeSource(val analyticsValue: String) {
     ACCOUNT_DETAILS("account_details"),
     APPEARANCE("appearance"),
@@ -26,5 +28,11 @@ enum class OnboardingUpgradeSource(val analyticsValue: String) {
     UP_NEXT_SHUFFLE("up_next_shuffle"),
     GENERATED_TRANSCRIPTS("generated_transcripts"),
     DEEP_LINK("deep_link"),
+    FINISHED_ONBOARDING("account_created"),
     UNKNOWN("unknown"),
+    ;
+
+    val eventHorizonValue get() = SOURCE_MAP[analyticsValue] ?: OnboardingSource.Unknown
 }
+
+private val SOURCE_MAP = OnboardingSource.entries.associateBy(OnboardingSource::toString)

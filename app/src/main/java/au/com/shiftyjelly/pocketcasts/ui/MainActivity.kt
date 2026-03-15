@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,7 +33,9 @@ import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_Y
+import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.commitNow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.Observer
@@ -52,12 +55,10 @@ import au.com.shiftyjelly.pocketcasts.account.onboarding.OnboardingActivity
 import au.com.shiftyjelly.pocketcasts.account.onboarding.OnboardingActivityContract
 import au.com.shiftyjelly.pocketcasts.account.onboarding.OnboardingActivityContract.OnboardingFinish
 import au.com.shiftyjelly.pocketcasts.account.watchsync.WatchSync
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
-import au.com.shiftyjelly.pocketcasts.analytics.EpisodeAnalytics
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.appreview.AppReviewDialogFragment
 import au.com.shiftyjelly.pocketcasts.compose.AppTheme
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.databinding.ActivityMainBinding
 import au.com.shiftyjelly.pocketcasts.deeplink.AddBookmarkDeepLink
 import au.com.shiftyjelly.pocketcasts.deeplink.AppOpenDeepLink
@@ -106,8 +107,6 @@ import au.com.shiftyjelly.pocketcasts.discover.view.PodcastListFragment
 import au.com.shiftyjelly.pocketcasts.endofyear.StoriesActivity
 import au.com.shiftyjelly.pocketcasts.endofyear.StoriesActivity.StoriesSource
 import au.com.shiftyjelly.pocketcasts.endofyear.ui.EndOfYearLaunchBottomSheet
-import au.com.shiftyjelly.pocketcasts.filters.FiltersFragment
-import au.com.shiftyjelly.pocketcasts.localization.helper.LocaliseHelper
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
@@ -134,6 +133,7 @@ import au.com.shiftyjelly.pocketcasts.podcasts.view.podcast.PodcastFragment
 import au.com.shiftyjelly.pocketcasts.podcasts.view.podcasts.PodcastsFragment
 import au.com.shiftyjelly.pocketcasts.podcasts.view.share.ShareListIncomingFragment
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
+import au.com.shiftyjelly.pocketcasts.preferences.model.AppReviewReason
 import au.com.shiftyjelly.pocketcasts.profile.ProfileFragment
 import au.com.shiftyjelly.pocketcasts.profile.SubCancelledFragment
 import au.com.shiftyjelly.pocketcasts.profile.TrialFinishedFragment
@@ -143,7 +143,6 @@ import au.com.shiftyjelly.pocketcasts.profile.sonos.SonosAppLinkActivity
 import au.com.shiftyjelly.pocketcasts.referrals.ReferralsGuestPassFragment
 import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewManager
 import au.com.shiftyjelly.pocketcasts.repositories.bumpstats.BumpStatsTask
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.repositories.di.NotificationPermissionChecker
 import au.com.shiftyjelly.pocketcasts.repositories.endofyear.EndOfYearManager
 import au.com.shiftyjelly.pocketcasts.repositories.notification.NotificationHelper
@@ -154,14 +153,11 @@ import au.com.shiftyjelly.pocketcasts.repositories.playback.UpNextSource
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.Playlist
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
-import au.com.shiftyjelly.pocketcasts.repositories.podcast.SmartPlaylistManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.refresh.RefreshPodcastsTask
 import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.search.SearchFragment
-import au.com.shiftyjelly.pocketcasts.servers.ServerCallback
 import au.com.shiftyjelly.pocketcasts.servers.ServiceManager
-import au.com.shiftyjelly.pocketcasts.servers.discover.PodcastSearch
 import au.com.shiftyjelly.pocketcasts.servers.model.NetworkLoadableList.Companion.TRENDING
 import au.com.shiftyjelly.pocketcasts.settings.AppearanceSettingsFragment
 import au.com.shiftyjelly.pocketcasts.settings.ExportSettingsFragment
@@ -176,7 +172,6 @@ import au.com.shiftyjelly.pocketcasts.ui.helper.FragmentHostListener
 import au.com.shiftyjelly.pocketcasts.ui.helper.NavigationBarColor
 import au.com.shiftyjelly.pocketcasts.ui.helper.StatusBarIconColor
 import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
-import au.com.shiftyjelly.pocketcasts.ui.theme.ThemeColor
 import au.com.shiftyjelly.pocketcasts.utils.Network
 import au.com.shiftyjelly.pocketcasts.utils.Util
 import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
@@ -187,6 +182,7 @@ import au.com.shiftyjelly.pocketcasts.view.LockableBottomSheetBehavior
 import au.com.shiftyjelly.pocketcasts.views.activity.WebViewActivity
 import au.com.shiftyjelly.pocketcasts.views.extensions.showAllowingStateLoss
 import au.com.shiftyjelly.pocketcasts.views.extensions.spring
+import au.com.shiftyjelly.pocketcasts.views.fragments.BaseDialogFragment
 import au.com.shiftyjelly.pocketcasts.views.fragments.BaseFragment
 import au.com.shiftyjelly.pocketcasts.views.fragments.TopScrollable
 import au.com.shiftyjelly.pocketcasts.views.helper.HasBackstack
@@ -194,6 +190,17 @@ import au.com.shiftyjelly.pocketcasts.views.helper.OffsettingBottomSheetCallback
 import au.com.shiftyjelly.pocketcasts.views.helper.UiUtil
 import au.com.shiftyjelly.pocketcasts.views.helper.WarningsHelper
 import com.automattic.android.tracks.crashlogging.CrashLogging
+import com.automattic.eventhorizon.DiscoverTabOpenedEvent
+import com.automattic.eventhorizon.EndOfYearModalDismissedEvent
+import com.automattic.eventhorizon.EndOfYearModalShownEvent
+import com.automattic.eventhorizon.EndOfYearModalTappedEvent
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.FiltersTabOpenedEvent
+import com.automattic.eventhorizon.PodcastsTabOpenedEvent
+import com.automattic.eventhorizon.ProfileTabOpenedEvent
+import com.automattic.eventhorizon.UpNextDismissedEvent
+import com.automattic.eventhorizon.UpNextShownEvent
+import com.automattic.eventhorizon.UpNextTabOpenedEvent
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
@@ -213,6 +220,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
@@ -256,9 +264,6 @@ class MainActivity :
     lateinit var podcastManager: PodcastManager
 
     @Inject
-    lateinit var smartPlaylistManager: SmartPlaylistManager
-
-    @Inject
     lateinit var episodeManager: EpisodeManager
 
     @Inject
@@ -277,10 +282,7 @@ class MainActivity :
     lateinit var warningsHelper: WarningsHelper
 
     @Inject
-    lateinit var analyticsTracker: AnalyticsTracker
-
-    @Inject
-    lateinit var episodeAnalytics: EpisodeAnalytics
+    lateinit var eventHorizon: EventHorizon
 
     @Inject
     lateinit var syncManager: SyncManager
@@ -358,7 +360,7 @@ class MainActivity :
 
             is OnboardingFinish.DoneShowPlusPromotion -> {
                 settings.setHasDoneInitialOnboarding()
-                OnboardingLauncher.openOnboardingFlow(this, OnboardingFlow.Upsell(OnboardingUpgradeSource.LOGIN_PLUS_PROMOTION))
+                OnboardingLauncher.openOnboardingFlow(this, OnboardingFlow.Upsell(OnboardingUpgradeSource.FINISHED_ONBOARDING))
             }
 
             is OnboardingFinish.DoneShowWelcomeInReferralFlow -> {
@@ -375,6 +377,24 @@ class MainActivity :
         BookmarkActivityContract(),
     ) { result ->
         showViewBookmarksSnackbar(result)
+    }
+
+    private val endOfYearActivityLauncher: ActivityResultLauncher<Intent> = registerForActivityResult(StoriesActivity.StoriesActivityContract()) { result ->
+        when (result) {
+            is StoriesActivity.StoriesActivityContract.Result.Failure -> {
+                result.source?.let { source ->
+                    val view = snackBarView()
+                    val action = View.OnClickListener {
+                        showStories(source = source)
+                    }
+                    Snackbar.make(view, getString(LR.string.end_of_year_failed_to_load_message), Snackbar.LENGTH_LONG)
+                        .setAction(LR.string.retry, action)
+                        .show()
+                }
+            }
+
+            else -> Unit
+        }
     }
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -439,9 +459,6 @@ class MainActivity :
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        if (!FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION)) {
-            checkForNotificationPermission()
-        }
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
             val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -457,12 +474,7 @@ class MainActivity :
             }
         }
 
-        val menuId = if (FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true)) {
-            VR.menu.navigation_playlists
-        } else {
-            VR.menu.navigation
-        }
-        binding.bottomNavigation.inflateMenu(menuId)
+        binding.bottomNavigation.inflateMenu(VR.menu.navigation)
 
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.CREATED) {
@@ -481,14 +493,7 @@ class MainActivity :
         var selectedTab = settings.selectedTab()
         val tabs = buildMap {
             put(VR.id.navigation_podcasts) { FragmentInfo(PodcastsFragment(), true) }
-            put(VR.id.navigation_filters) {
-                val fragment = if (FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true)) {
-                    PlaylistsFragment()
-                } else {
-                    FiltersFragment()
-                }
-                FragmentInfo(fragment, true)
-            }
+            put(VR.id.navigation_filters) { FragmentInfo(PlaylistsFragment(), true) }
             put(VR.id.navigation_discover) { FragmentInfo(DiscoverFragment(), false) }
             put(VR.id.navigation_profile) { FragmentInfo(ProfileFragment(), true) }
             put(VR.id.navigation_upnext) {
@@ -543,6 +548,8 @@ class MainActivity :
                 }
             })
             .addTo(disposables)
+
+        setupBackPressedCallbacks()
 
         setupPlayerViews(
             animateMiniPlayer = savedInstanceState == null,
@@ -661,23 +668,7 @@ class MainActivity :
         super.onResume()
 
         refreshApp()
-        addLineView()
         BumpStatsTask.scheduleToRun(this)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        removeLineView()
-    }
-
-    private fun addLineView() {
-        removeLineView()
-        if (theme.activeTheme != Theme.ThemeType.RADIOACTIVE) return
-        binding.radioactiveLineView.isVisible = true
-    }
-
-    private fun removeLineView() {
-        binding.radioactiveLineView.isVisible = false
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -735,72 +726,140 @@ class MainActivity :
         mediaRouter?.removeCallback(mediaRouterCallback)
     }
 
-    @SuppressLint("GestureBackNavigation")
-    @Deprecated("Deprecated in Java")
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        if (isUpNextShowing()) {
-            val fragment = supportFragmentManager.findFragmentByTag(UpNextFragment::class.java.name)
-            if ((fragment as UpNextFragment).multiSelectHelper.isMultiSelecting) {
-                fragment.multiSelectHelper.isMultiSelecting = false
-                return
+    /**
+     * Registers all back-press callbacks on the [OnBackPressedDispatcher].
+     *
+     * Callbacks are registered in reverse priority order (lowest first, highest last) since the
+     * dispatcher fires the last-registered enabled callback.
+     */
+    private fun setupBackPressedCallbacks() {
+        val bottomNavigatorCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                navigator.pop()
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, bottomNavigatorCallback)
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                navigator.canGoBack.collectLatest { canGoBack ->
+                    bottomNavigatorCallback.isEnabled = canGoBack
+                }
             }
         }
 
-        if (frameBottomSheetBehavior.state != BottomSheetBehavior.STATE_COLLAPSED) {
-            frameBottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
-            return
+        val playerBottomSheetCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                binding.playerBottomSheet.closePlayer()
+            }
         }
+        onBackPressedDispatcher.addCallback(this, playerBottomSheetCallback)
+        playerBottomSheetCallback.isEnabled = binding.playerBottomSheet.isPlayerOpen
 
-        if (navigator.isShowingModal()) {
-            val currentFragment = navigator.currentFragment()
-            if (currentFragment is HasBackstack) {
-                val handled = currentFragment.onBackPressed()
-                if (!handled) {
+        val playerContainerBackstackCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                val playerContainerFragment =
+                    supportFragmentManager.fragments.find { it is PlayerContainerFragment } as? PlayerContainerFragment
+                playerContainerFragment?.onBackPressed()
+                playerContainerCallbackUpdater?.invoke()
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, playerContainerBackstackCallback)
+
+        fun syncPlayerContainerCallback() {
+            val playerContainerFragment =
+                supportFragmentManager.fragments.find { it is PlayerContainerFragment } as? PlayerContainerFragment
+            val hasBackstack = playerContainerFragment != null && playerContainerFragment.getBackstackCount() > 0
+            val isPlayerOpen = binding.playerBottomSheet.isPlayerOpen
+            playerContainerBackstackCallback.isEnabled = isPlayerOpen && hasBackstack
+            if (isPlayerOpen) {
+                playerBottomSheetCallback.isEnabled = !hasBackstack
+            }
+        }
+        playerContainerCallbackUpdater = ::syncPlayerContainerCallback
+
+        val modalFragmentCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                val currentFragment = navigator.currentFragment()
+                if (currentFragment is HasBackstack) {
+                    val handled = currentFragment.onBackPressed()
+                    if (!handled) {
+                        navigator.pop()
+                    }
+                } else {
                     navigator.pop()
                 }
-                return
-            } else {
-                navigator.pop()
-                return
             }
         }
+        onBackPressedDispatcher.addCallback(this, modalFragmentCallback)
 
-        // Check for embedded up next fragment being shown in player container
-        val playerContainerFragment =
-            supportFragmentManager.fragments.find { it is PlayerContainerFragment } as? PlayerContainerFragment
-        if (playerContainerFragment != null) {
-            if (playerContainerFragment.getBackstackCount() > 0) {
-                if (playerContainerFragment.onBackPressed()) {
-                    return
-                }
+        val frameBottomSheetCallback = object : OnBackPressedCallback(bottomSheetTag != null) {
+            override fun handleOnBackPressed() {
+                frameBottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
             }
         }
+        onBackPressedDispatcher.addCallback(this, frameBottomSheetCallback)
 
-        if (binding.playerBottomSheet.isPlayerOpen) {
-            binding.playerBottomSheet.closePlayer()
-            return
-        }
+        frameBottomSheetBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+            override fun onSlide(bottomSheet: View, slideOffset: Float) {}
+            override fun onStateChanged(bottomSheet: View, newState: Int) {
+                frameBottomSheetCallback.isEnabled = newState != BottomSheetBehavior.STATE_COLLAPSED
+                modalFragmentCallback.isEnabled = navigator.isShowingModal()
+            }
+        })
 
-        // Some fragments have child fragments that require a back stack, we need to check for those
-        // before popping the main back stack
-        if (childrenWithBackStack.count() > 0) {
-            var handled = false
-            var index = 0
-            do {
-                val child = childrenWithBackStack[index++]
-                if (child is Fragment && child.userVisibleHint) {
-                    handled = child.onBackPressed()
-                }
-            } while (!handled && index < childrenWithBackStack.count())
-            if (handled) {
-                return
+        val upNextMultiSelectCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                val fragment = supportFragmentManager.findFragmentByTag(UpNextFragment::class.java.name)
+                (fragment as? UpNextFragment)?.multiSelectHelper?.isMultiSelecting = false
+                isEnabled = false
             }
         }
+        onBackPressedDispatcher.addCallback(this, upNextMultiSelectCallback)
 
-        if (navigator.isAtRootOfStack() || !navigator.pop()) {
-            super.onBackPressed()
+        navigator.infoStream()
+            .subscribe {
+                modalFragmentCallback.isEnabled = navigator.isShowingModal()
+                syncPlayerContainerCallback()
+            }
+            .also { disposables.add(it) }
+
+        this.playerBottomSheetBackCallback = playerBottomSheetCallback
+        this.upNextMultiSelectBackCallback = upNextMultiSelectCallback
+        this.playerContainerBackCallback = playerContainerBackstackCallback
+        this.modalFragmentBackCallback = modalFragmentCallback
+        this.frameBottomSheetBackCallback = frameBottomSheetCallback
+    }
+
+    private var playerBottomSheetBackCallback: OnBackPressedCallback? = null
+    private var upNextMultiSelectBackCallback: OnBackPressedCallback? = null
+    private var playerContainerBackCallback: OnBackPressedCallback? = null
+    private var modalFragmentBackCallback: OnBackPressedCallback? = null
+    private var frameBottomSheetBackCallback: OnBackPressedCallback? = null
+    private var playerContainerCallbackUpdater: (() -> Unit)? = null
+
+    private var upNextMultiSelectObserver: Observer<Boolean>? = null
+
+    private fun observeUpNextMultiSelectState(upNextFragment: UpNextFragment) {
+        val liveData = upNextFragment.multiSelectHelper.isMultiSelectingLive
+        upNextMultiSelectObserver?.let { liveData.removeObserver(it) }
+        val observer = Observer<Boolean> { isMultiSelecting ->
+            upNextMultiSelectBackCallback?.isEnabled = isUpNextShowing() && isMultiSelecting == true
         }
+        upNextMultiSelectObserver = observer
+        liveData.observe(this, observer)
+    }
+
+    private fun stopObservingUpNextMultiSelectState() {
+        val observer = upNextMultiSelectObserver ?: return
+        val fragment = supportFragmentManager.findFragmentByTag(UpNextFragment::class.java.name)
+        (fragment as? UpNextFragment)?.multiSelectHelper?.isMultiSelectingLive?.removeObserver(observer)
+        upNextMultiSelectObserver = null
+        upNextMultiSelectBackCallback?.isEnabled = false
+    }
+
+    override fun onPlayerBackstackChanged() {
+        playerContainerCallbackUpdater?.invoke()
     }
 
     override fun updateStatusBar() {
@@ -843,14 +902,17 @@ class MainActivity :
             podcastManager = podcastManager,
             episodeManager = episodeManager,
             fragmentManager = supportFragmentManager,
-            analyticsTracker = analyticsTracker,
-            episodeAnalytics = episodeAnalytics,
+            eventHorizon = eventHorizon,
             settings = settings,
         ).show(this)
     }
 
     private fun showUpNextFragment(source: UpNextSource) {
-        analyticsTracker.track(AnalyticsEvent.UP_NEXT_SHOWN, mapOf(SOURCE_KEY to source.analyticsValue))
+        eventHorizon.track(
+            UpNextShownEvent(
+                source = source.eventHorizonValue,
+            ),
+        )
         showBottomSheet(UpNextFragment.newInstance(source = source))
     }
 
@@ -866,15 +928,27 @@ class MainActivity :
                             parent = viewGroup,
                             shouldShow = shouldShow,
                             onClick = {
-                                showStoriesOrAccount(StoriesSource.MODAL.value)
+                                eventHorizon.track(
+                                    EndOfYearModalTappedEvent(
+                                        currentYear = EndOfYearManager.YEAR_TO_SYNC.value.toLong(),
+                                    ),
+                                )
+                                showStoriesOrAccount(StoriesSource.MODAL.key)
                             },
                             onExpand = {
-                                analyticsTracker.track(
-                                    AnalyticsEvent.END_OF_YEAR_MODAL_SHOWN,
-                                    mapOf("year" to EndOfYearManager.YEAR_TO_SYNC.value),
+                                eventHorizon.track(
+                                    EndOfYearModalShownEvent(
+                                        currentYear = EndOfYearManager.YEAR_TO_SYNC.value.toLong(),
+                                    ),
                                 )
                                 settings.setEndOfYearShowModal(false)
-                                viewModel.updateStoriesModalShowState(false)
+                            },
+                            onCollapse = {
+                                eventHorizon.track(
+                                    EndOfYearModalDismissedEvent(
+                                        currentYear = EndOfYearManager.YEAR_TO_SYNC.value.toLong(),
+                                    ),
+                                )
                             },
                         )
                     }
@@ -900,10 +974,11 @@ class MainActivity :
     }
 
     private fun showStories(source: StoriesSource) {
-        StoriesActivity.open(this, source)
+        endOfYearActivityLauncher.launch(
+            StoriesActivity.intent(activity = this, source = source),
+        )
     }
 
-    @Suppress("DEPRECATION")
     private fun setupPlayerViews(animateMiniPlayer: Boolean) {
         binding.playerBottomSheet.listener = this
         binding.playerBottomSheet.initializeBottomSheetBehavior()
@@ -994,6 +1069,7 @@ class MainActivity :
                 settings.setTrialFinishedSeen(true)
             }
 
+            // Result is intentionally ignored; failures are logged internally by sendAuthToDataLayer
             lifecycleScope.launch { watchSync.sendAuthToDataLayer() }
         }
 
@@ -1024,6 +1100,7 @@ class MainActivity :
                 viewModel.navigationState.collect { navigationState ->
                     when (navigationState) {
                         is NavigationState.BookmarksForCurrentlyPlaying -> showPlayerBookmarks()
+
                         is NavigationState.BookmarksForPodcastEpisode -> {
                             // Once episode container fragment is shown, bookmarks tab is shown from inside it based on the new source
                             openEpisodeDialog(
@@ -1054,7 +1131,7 @@ class MainActivity :
             }
         }
 
-        frameBottomSheetBehavior.setBottomSheetCallback(object :
+        frameBottomSheetBehavior.addBottomSheetCallback(object :
             BottomSheetBehavior.BottomSheetCallback() {
             override fun onSlide(bottomSheet: View, slideOffset: Float) {}
 
@@ -1062,7 +1139,7 @@ class MainActivity :
                 settings.updatePlayerOrUpNextBottomSheetState(newState)
                 if (newState == BottomSheetBehavior.STATE_COLLAPSED) {
                     if (bottomSheetTag == UpNextFragment::class.java.name) {
-                        analyticsTracker.track(AnalyticsEvent.UP_NEXT_DISMISSED)
+                        eventHorizon.track(UpNextDismissedEvent)
                     }
                     supportFragmentManager.findFragmentByTag(bottomSheetTag)?.let {
                         removeBottomSheetFragment(it)
@@ -1072,6 +1149,7 @@ class MainActivity :
                     frameBottomSheetBehavior.swipeEnabled = false
 
                     updateNavAndStatusColors(playerOpen = viewModel.isPlayerOpen, playingPodcast = viewModel.lastPlaybackState?.podcast)
+                    stopObservingUpNextMultiSelectState()
                 } else {
                     binding.playerBottomSheet.isDragEnabled = false
                 }
@@ -1115,12 +1193,22 @@ class MainActivity :
     }
 
     override fun snackBarView(): View {
-        val playerView = supportFragmentManager
+        return dialogSnackBarView() ?: playerSnackBarView() ?: binding.snackbarFragment
+    }
+
+    private fun dialogSnackBarView(): View? {
+        return supportFragmentManager.fragments
+            .filterIsInstance<BaseDialogFragment>()
+            .lastOrNull { it.isAdded && it.dialog?.isShowing == true }
+            ?.snackBarView()
+    }
+
+    private fun playerSnackBarView(): View? {
+        return supportFragmentManager
             .takeIf { viewModel.isPlayerOpen }
             ?.fragments
             ?.firstNotNullOfOrNull { it as? PlayerContainerFragment }
-            ?.view
-        return playerView ?: binding.snackbarFragment
+            ?.snackBarView()
     }
 
     override fun setFullScreenDarkOverlayViewVisibility(visible: Boolean) {
@@ -1174,6 +1262,7 @@ class MainActivity :
         UiUtil.hideKeyboard(binding.root)
 
         viewModel.isPlayerOpen = true
+        playerContainerCallbackUpdater?.invoke()
 
         val playerContainerFragment = supportFragmentManager.fragments
             .find { it is PlayerContainerFragment } as? PlayerContainerFragment
@@ -1185,6 +1274,8 @@ class MainActivity :
 
         viewModel.isPlayerOpen = false
         viewModel.closeMultiSelect()
+        playerBottomSheetBackCallback?.isEnabled = false
+        playerContainerCallbackUpdater?.invoke()
 
         val playerContainerFragment = supportFragmentManager.fragments
             .find { it is PlayerContainerFragment } as? PlayerContainerFragment
@@ -1202,13 +1293,26 @@ class MainActivity :
         }
 
         frameBottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
+        frameBottomSheetBackCallback?.isEnabled = true
         frameBottomSheetBehavior.swipeEnabled = true
         binding.frameBottomSheet.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        if (fragment is UpNextFragment) {
+            observeUpNextMultiSelectState(fragment)
+        } else {
+            stopObservingUpNextMultiSelectState()
+        }
     }
 
     override fun closeBottomSheet() {
         frameBottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+        frameBottomSheetBackCallback?.isEnabled = false
         binding.frameBottomSheet.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    override fun closeDialogs() {
+        supportFragmentManager.fragments.filterIsInstance<DialogFragment>().forEach {
+            it.dismissAllowingStateLoss()
+        }
     }
 
     override fun isUpNextShowing() = bottomSheetTag == UpNextFragment::class.java.name
@@ -1316,9 +1420,8 @@ class MainActivity :
         }
     }
 
-    @Suppress("DEPRECATION")
     override fun onSupportNavigateUp(): Boolean {
-        onBackPressed()
+        onBackPressedDispatcher.onBackPressed()
         return true
     }
 
@@ -1462,25 +1565,10 @@ class MainActivity :
                 }
 
                 is ShowPlaylistDeepLink -> {
-                    if (FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true)) {
-                        val type = Playlist.Type.fromValue(deepLink.playlistType) ?: return
-                        closePlayer()
-                        openTab(VR.id.navigation_filters)
-                        addFragment(PlaylistFragment.newInstance(deepLink.playlistUuid, type))
-                    } else {
-                        launch(Dispatchers.Default) {
-                            smartPlaylistManager.findByUuid(deepLink.playlistUuid)?.let {
-                                withContext(Dispatchers.Main) {
-                                    settings.setSelectedFilter(it.uuid)
-                                    // HACK: Go diving to find if a filter fragment
-                                    closePlayer()
-                                    openTab(VR.id.navigation_filters)
-                                    val filtersFragment = supportFragmentManager.fragments.find { it is FiltersFragment } as? FiltersFragment
-                                    filtersFragment?.openPlaylist(it)
-                                }
-                            }
-                        }
-                    }
+                    val type = Playlist.Type.fromValue(deepLink.playlistType) ?: return
+                    closePlayer()
+                    openTab(VR.id.navigation_filters)
+                    addFragment(PlaylistFragment.newInstance(deepLink.playlistUuid, type))
                 }
 
                 is CreateAccountDeepLink -> {
@@ -1687,7 +1775,7 @@ class MainActivity :
 
                 null -> {
                     val dialog = android.app.ProgressDialog.show(this@MainActivity, getString(LR.string.loading), getString(LR.string.please_wait), true)
-                    val searchResult = serviceManager.getSharedItemDetailsSuspend("/social/share/show/$episodeUuid")
+                    val searchResult = serviceManager.getSharedItemDetails("/social/share/show/$episodeUuid").getOrNull()
                     dialog.hide()
                     searchResult?.episode?.let {
                         EpisodeContainerFragment.newInstance(
@@ -1710,35 +1798,26 @@ class MainActivity :
         url ?: return
 
         val dialog = android.app.ProgressDialog.show(this, getString(LR.string.loading), getString(LR.string.please_wait), true)
-        serviceManager.searchForPodcasts(
-            url,
-            object : ServerCallback<PodcastSearch> {
-                override fun dataReturned(result: PodcastSearch?) {
-                    UiUtil.hideProgressDialog(dialog)
-                    val uuid = result?.searchResults?.firstOrNull()?.uuid ?: return
-                    openPodcastPage(uuid)
-                }
-
-                override fun onFailed(
-                    errorCode: Int,
-                    userMessage: String?,
-                    serverMessageId: String?,
-                    serverMessage: String?,
-                    throwable: Throwable?,
-                ) {
-                    UiUtil.hideProgressDialog(dialog)
-
-                    val message = LocaliseHelper.serverMessageIdToMessage(serverMessageId, ::getString)
-                        ?: userMessage
-                        ?: getString(LR.string.podcast_add_failed)
+        lifecycleScope.launch {
+            val result = serviceManager
+                .searchForPodcasts(url)
+                .onFailure { error ->
                     UiUtil.displayAlertError(
                         context = this@MainActivity,
-                        message = message,
+                        message = error.message ?: getString(LR.string.podcast_add_failed),
                         null,
                     )
                 }
-            },
-        )
+                .getOrNull()
+
+            UiUtil.hideProgressDialog(dialog)
+            if (result != null) {
+                val podcastUuid = result.searchResults.firstOrNull()?.uuid
+                if (podcastUuid != null) {
+                    openPodcastPage(podcastUuid)
+                }
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -1751,48 +1830,11 @@ class MainActivity :
         }
 
         val dialog = android.app.ProgressDialog.show(this, getString(LR.string.loading), getString(LR.string.please_wait), true)
-        serviceManager.getSharedItemDetails(
-            deepLink.sharePath,
-            object : ServerCallback<au.com.shiftyjelly.pocketcasts.models.to.Share> {
-                override fun dataReturned(result: au.com.shiftyjelly.pocketcasts.models.to.Share?) {
-                    UiUtil.hideProgressDialog(dialog)
-                    result ?: return
-
-                    val podcastUuid = result.podcast.uuid
-                    if (podcastUuid.isBlank()) {
-                        UiUtil.displayAlertError(
-                            this@MainActivity,
-                            getString(LR.string.podcast_share_open_fail_title),
-                            getString(LR.string.podcast_share_open_fail),
-                            null,
-                        )
-                        return
-                    }
-
-                    val episode = result.episode
-                    if (episode != null) {
-                        openEpisodeDialog(
-                            episodeUuid = episode.uuid,
-                            source = EpisodeViewSource.SHARE,
-                            podcastUuid = podcastUuid,
-                            forceDark = false,
-                            autoPlay = false,
-                            startTimestamp = deepLink.startTimestamp,
-                        )
-                    } else {
-                        openPodcastPage(podcastUuid)
-                    }
-                }
-
-                override fun onFailed(
-                    errorCode: Int,
-                    userMessage: String?,
-                    serverMessageId: String?,
-                    serverMessage: String?,
-                    throwable: Throwable?,
-                ) {
-                    UiUtil.hideProgressDialog(dialog)
-                    Timber.e(serverMessage)
+        lifecycleScope.launch {
+            val result = serviceManager
+                .getSharedItemDetails(deepLink.sharePath)
+                .onFailure { error ->
+                    Timber.e(error)
                     UiUtil.displayAlertError(
                         this@MainActivity,
                         getString(LR.string.podcast_share_open_fail_title),
@@ -1800,8 +1842,36 @@ class MainActivity :
                         null,
                     )
                 }
-            },
-        )
+                .getOrNull()
+
+            UiUtil.hideProgressDialog(dialog)
+            if (result != null) {
+                val podcastUuid = result.podcast.uuid
+                if (podcastUuid.isBlank()) {
+                    UiUtil.displayAlertError(
+                        this@MainActivity,
+                        getString(LR.string.podcast_share_open_fail_title),
+                        getString(LR.string.podcast_share_open_fail),
+                        null,
+                    )
+                    return@launch
+                }
+
+                val episode = result.episode
+                if (episode != null) {
+                    openEpisodeDialog(
+                        episodeUuid = episode.uuid,
+                        source = EpisodeViewSource.SHARE,
+                        podcastUuid = podcastUuid,
+                        forceDark = false,
+                        autoPlay = false,
+                        startTimestamp = deepLink.startTimestamp,
+                    )
+                } else {
+                    openPodcastPage(podcastUuid)
+                }
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -1830,18 +1900,33 @@ class MainActivity :
     }
 
     private fun trackTabOpened(tab: Int, isInitial: Boolean = false) {
-        val event: AnalyticsEvent? = when (tab) {
-            VR.id.navigation_podcasts -> AnalyticsEvent.PODCASTS_TAB_OPENED
-            VR.id.navigation_upnext -> AnalyticsEvent.UP_NEXT_TAB_OPENED
-            VR.id.navigation_filters -> AnalyticsEvent.FILTERS_TAB_OPENED
-            VR.id.navigation_discover -> AnalyticsEvent.DISCOVER_TAB_OPENED
-            VR.id.navigation_profile -> AnalyticsEvent.PROFILE_TAB_OPENED
+        val event = when (tab) {
+            VR.id.navigation_podcasts -> PodcastsTabOpenedEvent(
+                initial = isInitial,
+            )
+
+            VR.id.navigation_upnext -> UpNextTabOpenedEvent(
+                initial = isInitial,
+            )
+
+            VR.id.navigation_filters -> FiltersTabOpenedEvent(
+                initial = isInitial,
+            )
+
+            VR.id.navigation_discover -> DiscoverTabOpenedEvent(
+                initial = isInitial,
+            )
+
+            VR.id.navigation_profile -> ProfileTabOpenedEvent(
+                initial = isInitial,
+            )
+
             else -> {
                 Timber.e("Can't open invalid tab")
                 null
             }
         }
-        event?.let { analyticsTracker.track(event, mapOf(INITIAL_KEY to isInitial)) }
+        event?.let(eventHorizon::track)
     }
 
     override fun checkNotificationPermission(onPermissionGranted: () -> Unit) {
@@ -1878,9 +1963,6 @@ class MainActivity :
 
         Snackbar.make(view, snackbarMessage, Snackbar.LENGTH_LONG)
             .setAction(LR.string.settings_view, action)
-            .setActionTextColor(result.tintColor)
-            .setBackgroundTint(ThemeColor.primaryUi01(Theme.ThemeType.DARK))
-            .setTextColor(ThemeColor.primaryText01(Theme.ThemeType.DARK))
             .show()
     }
 
@@ -1897,13 +1979,58 @@ class MainActivity :
                 .flowWithLifecycle(lifecycle, Lifecycle.State.RESUMED)
                 .onStart { delay(3.seconds) } // Do not blast user with a review immediately on start
                 .collect { signal ->
-                    if (FeatureFlag.isEnabled(Feature.IMPROVE_APP_RATINGS) && supportFragmentManager.findFragmentByTag("app_review_prompt") == null) {
-                        AppReviewDialogFragment().show(supportFragmentManager, "app_review_prompt")
+                    if (canDisplayAppRatingsPrompt(signal.reason)) {
+                        AppReviewDialogFragment
+                            .newInstance(signal.reason, signal.reviewInfo)
+                            .show(supportFragmentManager, "app_review_prompt")
                         signal.consume()
                     } else {
                         signal.ignore()
                     }
                 }
         }
+    }
+
+    private fun canDisplayAppRatingsPrompt(reason: AppReviewReason): Boolean {
+        return reason == AppReviewReason.DevelopmentTrigger || (
+            FeatureFlag.isEnabled(Feature.IMPROVE_APP_RATINGS) &&
+                !binding.root.wasTouchedInLast(2.seconds) &&
+                frameBottomSheetBehavior.state == BottomSheetBehavior.STATE_COLLAPSED &&
+                !viewModel.shouldShowStoriesModal.value &&
+                !binding.playerBottomSheet.isPlayerOpen &&
+                isAtRootOfStack() &&
+                isNoDialogShown() &&
+                areChildrenAtRootOfStack() &&
+                isNoChildDialogShown()
+            )
+    }
+
+    private fun isAtRootOfStack(): Boolean {
+        return navigator.isAtRootOfStack() && supportFragmentManager.isAtRootOfStack()
+    }
+
+    private fun isNoDialogShown(): Boolean {
+        return !navigator.isShowingModal() && supportFragmentManager.isNoDialogShown()
+    }
+
+    private fun areChildrenAtRootOfStack(): Boolean {
+        return childrenWithBackStack.all { it.getBackstackCount() == 0 } &&
+            supportFragmentManager.fragments
+                .filter { fragment -> fragment.host != null }
+                .all { fragment -> fragment.childFragmentManager.isAtRootOfStack() }
+    }
+
+    private fun isNoChildDialogShown(): Boolean {
+        return supportFragmentManager.fragments
+            .filter { fragment -> fragment.host != null }
+            .all { fragment -> fragment.childFragmentManager.isNoDialogShown() }
+    }
+
+    private fun FragmentManager.isAtRootOfStack(): Boolean {
+        return backStackEntryCount == 0
+    }
+
+    private fun FragmentManager.isNoDialogShown(): Boolean {
+        return fragments.none { it is DialogFragment }
     }
 }

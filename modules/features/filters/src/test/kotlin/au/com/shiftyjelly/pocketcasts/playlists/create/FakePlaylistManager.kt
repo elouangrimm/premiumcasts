@@ -10,6 +10,7 @@ import au.com.shiftyjelly.pocketcasts.models.to.PlaylistPreviewForEpisode
 import au.com.shiftyjelly.pocketcasts.models.type.PlaylistEpisodeSortType
 import au.com.shiftyjelly.pocketcasts.models.type.SmartRules
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.ManualPlaylist
+import au.com.shiftyjelly.pocketcasts.repositories.playlist.Playlist
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistManager
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistPreview
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.SmartPlaylist
@@ -27,6 +28,18 @@ class FakePlaylistManager : PlaylistManager {
         return playlistPreviews.asStateFlow()
     }
 
+    override suspend fun findPlaylistPreview(playlistUuid: String): PlaylistPreview? {
+        return null
+    }
+
+    override suspend fun getAutoPlayEpisodes(playlistUuid: String, currentEpisodeUuid: String?): List<PodcastEpisode> {
+        return emptyList()
+    }
+
+    override suspend fun getAutoDownloadPlaylists(): List<Playlist> {
+        return emptyList()
+    }
+
     override fun getArtworkUuidsFlow(playlistUuid: String): StateFlow<List<String>?> {
         return MutableStateFlow(null)
     }
@@ -38,10 +51,6 @@ class FakePlaylistManager : PlaylistManager {
     override suspend fun refreshArtworkUuids(playlistUuid: String) = Unit
 
     override suspend fun refreshEpisodeCount(playlistUuid: String) = Unit
-
-    override suspend fun getAutoDownloadEpisodes(): List<PodcastEpisode> {
-        return emptyList()
-    }
 
     override suspend fun sortPlaylists(sortedUuids: List<String>) = Unit
 
@@ -95,7 +104,7 @@ class FakePlaylistManager : PlaylistManager {
         return manualPlaylist
     }
 
-    override fun playlistPreviewsForEpisodeFlow(episodeUuid: String, searchTerm: String?): Flow<List<PlaylistPreviewForEpisode>> {
+    override fun playlistPreviewsForEpisodeFlow(searchTerm: String?): Flow<List<PlaylistPreviewForEpisode>> {
         return flowOf(emptyList())
     }
 
@@ -111,11 +120,20 @@ class FakePlaylistManager : PlaylistManager {
         return flowOf(emptyList())
     }
 
-    override suspend fun addManualEpisode(playlistUuid: String, episodeUuid: String): Boolean {
+    val addManualEpisodeTurbine = Turbine<Pair<String, String>>(name = "addManualEpisodeTurbine")
+    override suspend fun addManualEpisodes(playlistUuid: String, episodeUuids: List<String>): Boolean {
+        for (episodeUuid in episodeUuids) {
+            addManualEpisodeTurbine.add(playlistUuid to episodeUuid)
+        }
         return true
     }
 
     override suspend fun sortManualEpisodes(playlistUuid: String, episodeUuids: List<String>) = Unit
 
-    override suspend fun deleteManualEpisodes(playlistUuid: String, episodeUuids: Collection<String>) = Unit
+    val deleteManualEpisodeTurbine = Turbine<Pair<String, String>>(name = "deleteManualEpisodeTurbine")
+    override suspend fun deleteManualEpisodes(playlistUuid: String, episodeUuids: Collection<String>) {
+        for (episodeUuid in episodeUuids) {
+            deleteManualEpisodeTurbine.add(playlistUuid to episodeUuid)
+        }
+    }
 }

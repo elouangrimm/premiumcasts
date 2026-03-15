@@ -15,14 +15,17 @@ import androidx.navigation.findNavController
 import au.com.shiftyjelly.pocketcasts.account.databinding.FragmentAccountBinding
 import au.com.shiftyjelly.pocketcasts.account.onboarding.components.ContinueWithGoogleButton
 import au.com.shiftyjelly.pocketcasts.account.viewmodel.AccountFragmentViewModel
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.compose.AppThemeWithBackground
 import au.com.shiftyjelly.pocketcasts.models.type.SignInState
+import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingFlow
 import au.com.shiftyjelly.pocketcasts.ui.extensions.getThemeTintedDrawable
 import au.com.shiftyjelly.pocketcasts.utils.Util
 import au.com.shiftyjelly.pocketcasts.utils.observeOnce
 import au.com.shiftyjelly.pocketcasts.views.fragments.BaseFragment
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.SetupAccountButtonTappedEvent
+import com.automattic.eventhorizon.SetupAccountButtonType
+import com.automattic.eventhorizon.SetupAccountDismissedEvent
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import au.com.shiftyjelly.pocketcasts.cartheme.R as CR
@@ -33,14 +36,10 @@ import au.com.shiftyjelly.pocketcasts.ui.R as UR
 @AndroidEntryPoint
 class AccountFragment : BaseFragment() {
     companion object {
-        private const val BUTTON = "button"
-        private const val SIGN_IN = "sign_in"
-        private const val CREATE_ACCOUNT = "create_account"
-        private val ACCOUNT_SOURCE = mapOf("source" to "account")
         fun newInstance() = AccountFragment()
     }
 
-    @Inject lateinit var analyticsTracker: AnalyticsTracker
+    @Inject lateinit var eventHorizon: EventHorizon
 
     private var realBinding: FragmentAccountBinding? = null
     private val binding: FragmentAccountBinding get() = realBinding ?: throw IllegalStateException("Trying to access the binding outside of the view lifecycle.")
@@ -80,7 +79,11 @@ class AccountFragment : BaseFragment() {
         }
 
         binding.btnClose?.setOnClickListener {
-            analyticsTracker.track(AnalyticsEvent.SETUP_ACCOUNT_DISMISSED, ACCOUNT_SOURCE)
+            eventHorizon.track(
+                SetupAccountDismissedEvent(
+                    flow = OnboardingFlow.LoggedOut.eventHorizonValue,
+                ),
+            )
             activity?.finish()
         }
 
@@ -88,7 +91,7 @@ class AccountFragment : BaseFragment() {
             setContent {
                 AppThemeWithBackground(theme.activeTheme) {
                     ContinueWithGoogleButton(
-                        flow = null,
+                        flow = OnboardingFlow.LoggedOut,
                         fontSize = dimensionResource(CR.dimen.car_body2_size).value.sp,
                         includePadding = false,
                         onComplete = { _, _ -> activity?.finish() },
@@ -98,9 +101,11 @@ class AccountFragment : BaseFragment() {
         }
 
         binding.btnCreate.setOnClickListener {
-            analyticsTracker.track(
-                AnalyticsEvent.SETUP_ACCOUNT_BUTTON_TAPPED,
-                ACCOUNT_SOURCE + mapOf(BUTTON to CREATE_ACCOUNT),
+            eventHorizon.track(
+                SetupAccountButtonTappedEvent(
+                    flow = OnboardingFlow.LoggedOut.eventHorizonValue,
+                    button = SetupAccountButtonType.CreateAccount,
+                ),
             )
             if (view.findNavController().currentDestination?.id == R.id.accountFragment) {
                 if (Util.isCarUiMode(view.context)) { // We can't sign up to plus on cars so skip that step
@@ -110,9 +115,11 @@ class AccountFragment : BaseFragment() {
         }
 
         binding.btnSignIn.setOnClickListener {
-            analyticsTracker.track(
-                AnalyticsEvent.SETUP_ACCOUNT_BUTTON_TAPPED,
-                ACCOUNT_SOURCE + mapOf(BUTTON to SIGN_IN),
+            eventHorizon.track(
+                SetupAccountButtonTappedEvent(
+                    flow = OnboardingFlow.LoggedOut.eventHorizonValue,
+                    button = SetupAccountButtonType.SignIn,
+                ),
             )
             if (view.findNavController().currentDestination?.id == R.id.accountFragment) {
                 view.findNavController().navigate(R.id.action_accountFragment_to_signInFragment)

@@ -1,6 +1,6 @@
 package au.com.shiftyjelly.pocketcasts.navigation
 
-/**
+/*
  * Copyright 2019 Pandora Media, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -37,11 +37,25 @@ import com.google.android.material.navigation.NavigationBarView
 import hu.akarnokd.rxjava2.subjects.UnicastWorkSubject
 import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 open class BottomNavigator internal constructor() : ViewModel() {
     internal val fragmentTransactionPublisher = UnicastWorkSubject.create<CommandWithRunnable>()
     internal val bottomnavViewSetSelectedItemObservable = UnicastWorkSubject.create<Int>()
     private val resetRootFragmentSubject = UnicastWorkSubject.create<Fragment>()
+
+    /**
+     * Emits `true` when the navigator has entries that can be popped, `false` when at the root
+     * of the current tab with no modal showing.
+     */
+    private val _canGoBack = MutableStateFlow(false)
+    open val canGoBack: StateFlow<Boolean> = _canGoBack.asStateFlow()
+
+    private fun updateCanGoBack() {
+        _canGoBack.value = !isAtRootOfStack() || isShowingModal()
+    }
 
     /**
      * Subscribing to this stream changes the behavior of tapping on the current tab when showing a RootFragment.
@@ -91,7 +105,7 @@ open class BottomNavigator internal constructor() : ViewModel() {
                     tabStackMap.peekValue().toString() == currentFragment.tag
 
                 if (resetRootFragmentSubject.hasObservers() && tabstackAndFragmentManagerInSync) {
-                    resetRootFragmentSubject.onNext(currentFragment!!)
+                    resetRootFragmentSubject.onNext(currentFragment)
                 } else {
                     reset(tab, true)
                 }
@@ -277,12 +291,15 @@ open class BottomNavigator internal constructor() : ViewModel() {
                 }
             },
         )
+        updateCanGoBack()
     }
 
     private fun getInfoEvents(command: FragmentTransactionCommand): List<NavigatorAction> {
         return when (command) {
             is AddAndShow -> listOf(NavigatorAction.NewFragmentAdded(command.fragment))
+
             is AddOnTop -> listOf(NavigatorAction.NewFragmentAdded(command.fragment))
+
             is RemoveAllAndAdd -> {
                 command.remove
                     .map {
@@ -290,6 +307,7 @@ open class BottomNavigator internal constructor() : ViewModel() {
                     }
                     .plus(NavigatorAction.NewFragmentAdded(command.add.fragment))
             }
+
             is ShowAndRemove ->
                 listOf(
                     NavigatorAction.FragmentRemoved(
@@ -297,19 +315,24 @@ open class BottomNavigator internal constructor() : ViewModel() {
                         command.showTag.className,
                     ),
                 )
+
             is RemoveAllAndShowExisting -> {
                 command.remove
                     .map {
                         NavigatorAction.FragmentRemoved(it.className, command.show.tag.className)
                     }
             }
-            is ShowExisting -> emptyList() // tracked by tabSwitches
+
+            is ShowExisting -> emptyList()
+
+            // tracked by tabSwitches
             is Clear -> command.allCurrentTags.map {
                 NavigatorAction.FragmentRemoved(
                     it.className,
                     null,
                 )
             }
+
             is FragmentTransactionCommand.RemoveUnknown -> emptyList() // no info
         }
     }

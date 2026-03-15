@@ -6,21 +6,19 @@ import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.discover.databinding.CollectionHeaderBinding
 import au.com.shiftyjelly.pocketcasts.discover.databinding.ItemCollectionListBinding
 import au.com.shiftyjelly.pocketcasts.discover.view.CollectionListRowAdapter.CollectionItem
 import au.com.shiftyjelly.pocketcasts.discover.view.CollectionListRowAdapter.CollectionItem.CollectionHeader
 import au.com.shiftyjelly.pocketcasts.discover.view.CollectionListRowAdapter.CollectionItem.CollectionPodcast
 import au.com.shiftyjelly.pocketcasts.discover.view.CollectionListRowAdapter.PodcastsViewHolder.Companion.NUMBER_OF_ROWS_PER_PAGE
-import au.com.shiftyjelly.pocketcasts.discover.view.DiscoverFragment.Companion.LIST_ID_KEY
-import au.com.shiftyjelly.pocketcasts.discover.view.DiscoverFragment.Companion.PODCAST_UUID_KEY
 import au.com.shiftyjelly.pocketcasts.repositories.images.PocketCastsImageRequestFactory
 import au.com.shiftyjelly.pocketcasts.repositories.images.PocketCastsImageRequestFactory.PlaceholderType
 import au.com.shiftyjelly.pocketcasts.repositories.images.loadInto
 import au.com.shiftyjelly.pocketcasts.servers.model.DiscoverPodcast
 import au.com.shiftyjelly.pocketcasts.ui.extensions.themed
+import com.automattic.eventhorizon.DiscoverListPodcastTappedEvent
+import com.automattic.eventhorizon.EventHorizon
 import au.com.shiftyjelly.pocketcasts.localization.R as LR
 
 private val differ = object : DiffUtil.ItemCallback<List<CollectionItem>>() {
@@ -48,7 +46,7 @@ class CollectionListRowAdapter(
     val onPodcastClicked: ((DiscoverPodcast, String?) -> Unit),
     val onPodcastSubscribe: (DiscoverPodcast, String?) -> Unit,
     val onHeaderClicked: () -> Unit,
-    val analyticsTracker: AnalyticsTracker,
+    val eventHorizon: EventHorizon,
 ) : ListAdapter<List<CollectionItem>, RecyclerView.ViewHolder>(differ) {
 
     private var fromListId: String? = null
@@ -137,16 +135,15 @@ class CollectionListRowAdapter(
                     onItemClicked = { pageIndex, podcastIndex ->
                         val items = getItem(pageIndex)
                         val podcasts = items.filterIsInstance<CollectionPodcast>().map { it.podcast }
-                        val podcast = podcasts.getOrNull(podcastIndex) as? DiscoverPodcast
+                        val podcast = podcasts.getOrNull(podcastIndex)
 
                         if (podcast == null) return@PodcastsViewHolder
 
-                        fromListId?.let {
-                            analyticsTracker.track(
-                                AnalyticsEvent.DISCOVER_LIST_PODCAST_TAPPED,
-                                mapOf(
-                                    LIST_ID_KEY to it,
-                                    PODCAST_UUID_KEY to podcast.uuid,
+                        fromListId?.let { listId ->
+                            eventHorizon.track(
+                                DiscoverListPodcastTappedEvent(
+                                    listId = listId,
+                                    podcastUuid = podcast.uuid,
                                 ),
                             )
                         }
@@ -155,7 +152,7 @@ class CollectionListRowAdapter(
                     onPodcastSubscribe = { pageIndex, podcastIndex ->
                         val items = getItem(pageIndex)
                         val podcasts = items.filterIsInstance<CollectionPodcast>().map { it.podcast }
-                        val podcast = podcasts.getOrNull(podcastIndex) as? DiscoverPodcast
+                        val podcast = podcasts.getOrNull(podcastIndex)
                         podcast?.let { onPodcastSubscribe(it, fromListId) }
                     },
                 )
@@ -175,6 +172,7 @@ class CollectionListRowAdapter(
         val items = getItem(position) ?: emptyList()
         when (val collectionItem = items.firstOrNull()) {
             is CollectionHeader -> (holder as HeaderViewHolder).bind(collectionItem)
+
             is CollectionPodcast -> {
                 val podcasts = items.filterIsInstance<CollectionPodcast>().map { it.podcast }
                 (holder as PodcastsViewHolder).bindPodcasts(podcasts)

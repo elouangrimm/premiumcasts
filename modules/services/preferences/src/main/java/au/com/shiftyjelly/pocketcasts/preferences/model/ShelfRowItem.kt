@@ -4,8 +4,7 @@ import androidx.annotation.StringRes
 import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
+import com.automattic.eventhorizon.ShelfActionType
 import au.com.shiftyjelly.pocketcasts.images.R as IR
 import au.com.shiftyjelly.pocketcasts.localization.R as LR
 
@@ -17,19 +16,19 @@ enum class ShelfItem(
     val subtitleId: (BaseEpisode?) -> Int? = { null },
     val iconId: (BaseEpisode?) -> Int,
     val showIf: (BaseEpisode?) -> Boolean = { true },
-    val analyticsValue: String,
+    val eventHorizonValue: ShelfActionType,
 ) : ShelfRowItem {
     Effects(
         id = "effects",
         titleId = { LR.string.podcast_playback_effects },
         iconId = { IR.drawable.ic_effects_off },
-        analyticsValue = "playback_effects",
+        eventHorizonValue = ShelfActionType.PlaybackEffects,
     ),
     Sleep(
         id = "sleep",
         titleId = { LR.string.player_sleep_timer },
         iconId = { IR.drawable.ic_sleep },
-        analyticsValue = "sleep_timer",
+        eventHorizonValue = ShelfActionType.SleepTimer,
     ),
     Star(
         id = "star",
@@ -37,7 +36,7 @@ enum class ShelfItem(
         subtitleId = { episode -> LR.string.player_actions_hidden_for_custom.takeIf { episode is UserEpisode } },
         iconId = { if (it is PodcastEpisode && it.isStarred) IR.drawable.ic_star_filled else IR.drawable.ic_star },
         showIf = { it is PodcastEpisode },
-        analyticsValue = "star_episode",
+        eventHorizonValue = ShelfActionType.StarEpisode,
     ),
     Share(
         id = "share",
@@ -45,72 +44,72 @@ enum class ShelfItem(
         subtitleId = { episode -> LR.string.player_actions_hidden_for_custom.takeIf { episode is UserEpisode } },
         iconId = { IR.drawable.ic_share },
         showIf = { it is PodcastEpisode },
-        analyticsValue = "share_episode",
+        eventHorizonValue = ShelfActionType.ShareEpisode,
     ),
     AddToPlaylist(
         id = "add_to_playlist",
         titleId = { LR.string.add_to_playlist_description },
-        showIf = { it is PodcastEpisode && FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true) },
+        showIf = { it is PodcastEpisode },
         iconId = { IR.drawable.ic_add_to_playlist_action },
-        analyticsValue = "add_to_playlist",
+        eventHorizonValue = ShelfActionType.AddToPlaylist,
     ),
     Download(
         id = "download",
         titleId = {
             when {
-                it is PodcastEpisode && (it.isDownloading || it.isQueued) -> LR.string.episode_downloading
+                it is PodcastEpisode && (it.isDownloading || it.isDownloadPending) -> LR.string.episode_downloading
                 it is PodcastEpisode && it.isDownloaded -> LR.string.remove_downloaded_file
                 else -> LR.string.download
             }
         },
         iconId = {
             when {
-                it is PodcastEpisode && (it.isDownloading || it.isQueued) -> IR.drawable.ic_download
+                it is PodcastEpisode && (it.isDownloading || it.isDownloadPending) -> IR.drawable.ic_download
                 it is PodcastEpisode && it.isDownloaded -> IR.drawable.ic_downloaded_24dp
                 else -> IR.drawable.ic_download
             }
         },
         subtitleId = { episode -> LR.string.player_actions_hidden_for_custom.takeIf { episode is UserEpisode } },
         showIf = { it is PodcastEpisode },
-        analyticsValue = "download",
+        eventHorizonValue = ShelfActionType.Download,
     ),
     Transcript(
         id = "transcript",
         titleId = { LR.string.transcript },
         iconId = { IR.drawable.ic_transcript_24 },
         showIf = { it is PodcastEpisode },
-        analyticsValue = "transcript",
+        eventHorizonValue = ShelfActionType.Transcript,
     ),
     Podcast(
         id = "podcast",
         titleId = { if (it is UserEpisode) LR.string.go_to_files else LR.string.go_to_podcast },
         iconId = { IR.drawable.ic_arrow_goto },
-        analyticsValue = "go_to_podcast",
+        eventHorizonValue = ShelfActionType.GoToPodcast,
     ),
     Bookmark(
         id = "bookmark",
         titleId = { LR.string.add_bookmark },
         iconId = { IR.drawable.ic_bookmark },
-        analyticsValue = "add_bookmark",
+        eventHorizonValue = ShelfActionType.AddBookmark,
     ),
     Cast(
         id = "cast",
         titleId = { LR.string.chromecast },
         iconId = { com.google.android.gms.cast.framework.R.drawable.quantum_ic_cast_connected_white_24 },
-        analyticsValue = "chromecast",
+        eventHorizonValue = ShelfActionType.Chromecast,
     ),
     Played(
         id = "played",
         titleId = { LR.string.mark_as_played },
         iconId = { IR.drawable.ic_markasplayed },
-        analyticsValue = "mark_as_played",
+        eventHorizonValue = ShelfActionType.MarkAsPlayed,
     ),
     Archive(
         id = "archive",
         titleId = { if (it is UserEpisode) LR.string.delete else LR.string.archive },
         subtitleId = { episode -> LR.string.player_actions_show_as_delete_for_custom.takeIf { episode is UserEpisode } },
         iconId = { if (it is UserEpisode) IR.drawable.ic_delete else IR.drawable.ic_archive },
-        analyticsValue = "archive",
+        eventHorizonValue = ShelfActionType.Archive,
     ),
     ;
 

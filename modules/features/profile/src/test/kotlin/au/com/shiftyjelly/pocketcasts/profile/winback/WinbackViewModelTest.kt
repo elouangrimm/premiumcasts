@@ -5,6 +5,7 @@ import app.cash.turbine.TurbineTestContext
 import app.cash.turbine.test
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.TrackedEvent
 import au.com.shiftyjelly.pocketcasts.analytics.Tracker
 import au.com.shiftyjelly.pocketcasts.models.type.Subscription
 import au.com.shiftyjelly.pocketcasts.payment.AcknowledgedSubscription
@@ -35,7 +36,6 @@ import org.junit.Test
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
-import org.mockito.kotlin.wheneverBlocking
 
 class WinbackViewModelTest {
     @get:Rule
@@ -54,7 +54,7 @@ class WinbackViewModelTest {
             on { flow } doReturn MutableStateFlow(null)
         }
         whenever(settings.cachedSubscription) doReturn subscriptionSettingMock
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Yearly)!!,
         )
 
@@ -62,7 +62,7 @@ class WinbackViewModelTest {
             paymentClient = PaymentClient.test(paymentDataSource),
             referralManager = referralManager,
             settings = settings,
-            tracker = AnalyticsTracker.test(tracker, isFirstPartyEnabled = true),
+            tracker = AnalyticsTracker.test(tracker),
         )
     }
 
@@ -271,7 +271,7 @@ class WinbackViewModelTest {
         paymentDataSource.loadedPurchases = listOf(
             createPurchase(productIds = listOf(SubscriptionPlan.PLUS_MONTHLY_PRODUCT_ID)),
         )
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Monthly)!!,
         )
 
@@ -284,6 +284,7 @@ class WinbackViewModelTest {
                     formattedPrice = "$3.99",
                     tier = SubscriptionTier.Plus,
                     billingCycle = BillingCycle.Monthly,
+                    isInstallment = false,
                 ),
                 awaitItem().winbackOfferState?.offer,
             )
@@ -301,6 +302,7 @@ class WinbackViewModelTest {
                     formattedPrice = "$20.00",
                     tier = SubscriptionTier.Plus,
                     billingCycle = BillingCycle.Yearly,
+                    isInstallment = false,
                 ),
                 awaitItem().winbackOfferState?.offer,
             )
@@ -312,7 +314,7 @@ class WinbackViewModelTest {
         paymentDataSource.loadedPurchases = listOf(
             createPurchase(productIds = listOf(SubscriptionPlan.PATRON_MONTHLY_PRODUCT_ID)),
         )
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Patron, BillingCycle.Monthly)!!,
         )
 
@@ -325,6 +327,7 @@ class WinbackViewModelTest {
                     formattedPrice = "$9.99",
                     tier = SubscriptionTier.Patron,
                     billingCycle = BillingCycle.Monthly,
+                    isInstallment = false,
                 ),
                 awaitItem().winbackOfferState?.offer,
             )
@@ -336,7 +339,7 @@ class WinbackViewModelTest {
         paymentDataSource.loadedPurchases = listOf(
             createPurchase(productIds = listOf(SubscriptionPlan.PATRON_YEARLY_PRODUCT_ID)),
         )
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Patron, BillingCycle.Yearly)!!,
         )
 
@@ -349,6 +352,7 @@ class WinbackViewModelTest {
                     formattedPrice = "$50.00",
                     tier = SubscriptionTier.Patron,
                     billingCycle = BillingCycle.Yearly,
+                    isInstallment = false,
                 ),
                 awaitItem().winbackOfferState?.offer,
             )
@@ -357,7 +361,7 @@ class WinbackViewModelTest {
 
     @Test
     fun `no winback offer`() = runTest {
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn ReferralResult.EmptyResult()
+        whenever { referralManager.getWinbackResponse() } doReturn ReferralResult.EmptyResult()
 
         viewModel.loadWinbackData()
 
@@ -377,7 +381,7 @@ class WinbackViewModelTest {
         viewModel.loadWinbackData()
 
         paymentDataSource.loadedPurchases = listOf(newPurchase)
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Patron, BillingCycle.Yearly)!!,
         )
 
@@ -389,6 +393,7 @@ class WinbackViewModelTest {
                 formattedPrice = "$50.00",
                 tier = SubscriptionTier.Patron,
                 billingCycle = BillingCycle.Yearly,
+                isInstallment = false,
             ),
             viewModel.uiState.value.winbackOfferState?.offer,
         )
@@ -396,7 +401,7 @@ class WinbackViewModelTest {
 
     @Test
     fun `winback offer with blank offer ID`() = runTest {
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(offerId = "")
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(offerId = "")
 
         viewModel.loadWinbackData()
 
@@ -407,7 +412,7 @@ class WinbackViewModelTest {
 
     @Test
     fun `winback offer with blank redeem code`() = runTest {
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(code = "")
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(code = "")
 
         viewModel.loadWinbackData()
 
@@ -418,7 +423,7 @@ class WinbackViewModelTest {
 
     @Test
     fun `winback offer with unknown ID`() = runTest {
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(offerId = "unknown-offer")
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(offerId = "unknown-offer")
 
         viewModel.loadWinbackData()
 
@@ -432,7 +437,7 @@ class WinbackViewModelTest {
         paymentDataSource.loadedPurchases = listOf(
             createPurchase(productIds = listOf(SubscriptionPlan.PLUS_YEARLY_PRODUCT_ID)),
         )
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Monthly)!!,
         )
 
@@ -452,7 +457,7 @@ class WinbackViewModelTest {
             val newPricingPlans = product.pricingPlans.copy(offerPlans = newOfferPlans)
             product.copy(pricingPlans = newPricingPlans)
         }
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Monthly)!!,
         )
 
@@ -474,7 +479,7 @@ class WinbackViewModelTest {
             val newPricingPlans = product.pricingPlans.copy(offerPlans = newOfferPlans)
             product.copy(pricingPlans = newPricingPlans)
         }
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Monthly)!!,
         )
 
@@ -489,7 +494,7 @@ class WinbackViewModelTest {
 
     @Test
     fun `claim winback offer successfully`() = runTest {
-        wheneverBlocking { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
             offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Yearly)!!,
         )
 
@@ -575,7 +580,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_SCREEN_SHOWN,
                 mapOf("screen" to "screen_key"),
             ),
@@ -589,7 +594,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_SCREEN_DISMISSED,
                 mapOf("screen" to "screen_key"),
             ),
@@ -603,7 +608,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(AnalyticsEvent.WINBACK_CONTINUE_BUTTON_TAP, emptyMap()),
+            TrackedEvent(AnalyticsEvent.WINBACK_CONTINUE_BUTTON_TAP, emptyMap()),
             event,
         )
     }
@@ -619,12 +624,13 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_MAIN_SCREEN_ROW_TAP,
                 mapOf(
                     "row" to "claim_offer",
                     "tier" to "plus",
                     "frequency" to "monthly",
+                    "is_installment" to "false",
                 ),
             ),
             event,
@@ -642,12 +648,13 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_MAIN_SCREEN_ROW_TAP,
                 mapOf(
                     "row" to "claim_offer",
                     "tier" to "plus",
                     "frequency" to "yearly",
+                    "is_installment" to "false",
                 ),
             ),
             event,
@@ -665,12 +672,13 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_MAIN_SCREEN_ROW_TAP,
                 mapOf(
                     "row" to "claim_offer",
                     "tier" to "patron",
                     "frequency" to "monthly",
+                    "is_installment" to "false",
                 ),
             ),
             event,
@@ -688,16 +696,104 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_MAIN_SCREEN_ROW_TAP,
                 mapOf(
                     "row" to "claim_offer",
                     "tier" to "patron",
                     "frequency" to "yearly",
+                    "is_installment" to "false",
                 ),
             ),
             event,
         )
+    }
+
+    @Test
+    fun `plus yearly installment winback offer`() = runTest {
+        paymentDataSource.loadedPurchases = listOf(
+            createPurchase(productIds = listOf(SubscriptionPlan.PLUS_YEARLY_INSTALLMENT_PRODUCT_ID)),
+        )
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+            offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Yearly, isInstallment = true)!!,
+        )
+
+        viewModel.loadWinbackData()
+
+        viewModel.uiState.test {
+            val offer = awaitItem().winbackOfferState?.offer
+            assertEquals(
+                WinbackOffer(
+                    redeemCode = "ABC",
+                    formattedPrice = "$1.67",
+                    tier = SubscriptionTier.Plus,
+                    billingCycle = BillingCycle.Yearly,
+                    isInstallment = true,
+                    formattedTotalSavings = "$19.98",
+                ),
+                offer,
+            )
+        }
+    }
+
+    @Test
+    fun `claim plus yearly installment offer successfully`() = runTest {
+        paymentDataSource.loadedPurchases = listOf(
+            createPurchase(productIds = listOf(SubscriptionPlan.PLUS_YEARLY_INSTALLMENT_PRODUCT_ID)),
+        )
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+            offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Yearly, isInstallment = true)!!,
+        )
+
+        viewModel.loadWinbackData()
+        viewModel.claimOffer(mock<Activity>())
+
+        viewModel.uiState.test {
+            val claimedState = awaitOfferState()
+            assertTrue(claimedState.isOfferClaimed)
+        }
+    }
+
+    @Test
+    fun `track claim plus yearly installment offer tapped`() = runTest {
+        paymentDataSource.loadedPurchases = listOf(
+            createPurchase(productIds = listOf(SubscriptionPlan.PLUS_YEARLY_INSTALLMENT_PRODUCT_ID)),
+        )
+        whenever { referralManager.getWinbackResponse() } doReturn createSuccessReferralResult(
+            offerId = SubscriptionOffer.Winback.offerId(SubscriptionTier.Plus, BillingCycle.Yearly, isInstallment = true)!!,
+        )
+
+        viewModel.loadWinbackData()
+        viewModel.claimOffer(mock<Activity>())
+
+        val event = tracker.events.single()
+        assertEquals(
+            TrackedEvent(
+                AnalyticsEvent.WINBACK_MAIN_SCREEN_ROW_TAP,
+                mapOf(
+                    "row" to "claim_offer",
+                    "tier" to "plus",
+                    "frequency" to "yearly",
+                    "is_installment" to "true",
+                ),
+            ),
+            event,
+        )
+    }
+
+    @Test
+    fun `verify installment plan details are loaded`() = runTest {
+        paymentDataSource.loadedPurchases = listOf(
+            createPurchase(productIds = listOf(SubscriptionPlan.PLUS_YEARLY_INSTALLMENT_PRODUCT_ID)),
+        )
+
+        viewModel.loadWinbackData()
+
+        viewModel.uiState.test {
+            val state = awaitLoadedState()
+            assertTrue(state.currentSubscription.isInstallment)
+            assertEquals(SubscriptionPlan.PLUS_YEARLY_INSTALLMENT_PRODUCT_ID, state.currentSubscription.productId)
+        }
     }
 
     @Test
@@ -706,7 +802,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_MAIN_SCREEN_ROW_TAP,
                 mapOf("row" to "available_plans"),
             ),
@@ -720,7 +816,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(
+            TrackedEvent(
                 AnalyticsEvent.WINBACK_MAIN_SCREEN_ROW_TAP,
                 mapOf("row" to "help_and_feedback"),
             ),
@@ -734,7 +830,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(AnalyticsEvent.WINBACK_OFFER_CLAIMED_DONE_BUTTON_TAPPED, emptyMap()),
+            TrackedEvent(AnalyticsEvent.WINBACK_OFFER_CLAIMED_DONE_BUTTON_TAPPED, emptyMap()),
             event,
         )
     }
@@ -745,7 +841,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(AnalyticsEvent.WINBACK_AVAILABLE_PLANS_BACK_BUTTON_TAPPED, emptyMap()),
+            TrackedEvent(AnalyticsEvent.WINBACK_AVAILABLE_PLANS_BACK_BUTTON_TAPPED, emptyMap()),
             event,
         )
     }
@@ -763,13 +859,13 @@ class WinbackViewModelTest {
 
         assertEquals(
             listOf(
-                TrackEvent(
+                TrackedEvent(
                     AnalyticsEvent.WINBACK_AVAILABLE_PLANS_SELECT_PLAN,
                     mapOf(
                         "product" to SubscriptionPlan.PLUS_MONTHLY_PRODUCT_ID,
                     ),
                 ),
-                TrackEvent(
+                TrackedEvent(
                     AnalyticsEvent.WINBACK_AVAILABLE_PLANS_NEW_PLAN_PURCHASE_SUCCESSFUL,
                     mapOf(
                         "current_product" to SubscriptionPlan.PLUS_YEARLY_PRODUCT_ID,
@@ -787,7 +883,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(AnalyticsEvent.WINBACK_CANCEL_CONFIRMATION_STAY_BUTTON_TAPPED, emptyMap()),
+            TrackedEvent(AnalyticsEvent.WINBACK_CANCEL_CONFIRMATION_STAY_BUTTON_TAPPED, emptyMap()),
             event,
         )
     }
@@ -798,7 +894,7 @@ class WinbackViewModelTest {
 
         val event = tracker.events.single()
         assertEquals(
-            TrackEvent(AnalyticsEvent.WINBACK_CANCEL_CONFIRMATION_CANCEL_BUTTON_TAPPED, emptyMap()),
+            TrackedEvent(AnalyticsEvent.WINBACK_CANCEL_CONFIRMATION_CANCEL_BUTTON_TAPPED, emptyMap()),
             event,
         )
     }
@@ -836,12 +932,18 @@ private fun createSuccessReferralResult(
 )
 
 class FakeTracker : Tracker {
-    private val _events = mutableListOf<TrackEvent>()
+    private val _events = mutableListOf<TrackedEvent>()
 
     val events get() = _events.toList()
 
-    override fun track(event: AnalyticsEvent, properties: Map<String, Any>) {
-        _events += TrackEvent(event, properties)
+    override val id get() = "fake_tracker"
+
+    override fun shouldTrack(event: AnalyticsEvent) = true
+
+    override fun track(event: AnalyticsEvent, properties: Map<String, Any>): TrackedEvent {
+        val trackedEvent = TrackedEvent(event, properties)
+        _events += trackedEvent
+        return trackedEvent
     }
 
     override fun refreshMetadata() = Unit
@@ -850,8 +952,3 @@ class FakeTracker : Tracker {
 
     override fun clearAllData() = Unit
 }
-
-data class TrackEvent(
-    val type: AnalyticsEvent,
-    val properties: Map<String, Any>,
-)

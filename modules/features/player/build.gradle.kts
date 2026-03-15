@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.parcelize)
@@ -38,6 +37,7 @@ dependencies {
     api(projects.modules.features.transcripts)
     api(projects.modules.services.analytics)
     api(projects.modules.services.compose)
+    api(projects.modules.services.coroutines)
     api(projects.modules.services.localization)
     api(projects.modules.services.model)
     api(projects.modules.services.preferences)
@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.androidx.preference.ktx)
     implementation(libs.androidx.webkit)
     implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
     implementation(libs.compose.animation)
     implementation(libs.compose.livedata)
     implementation(libs.compose.material)
@@ -90,4 +91,5 @@ dependencies {
     testImplementation(libs.turbine)
 
     testImplementation(projects.modules.services.sharedtest)
+    testImplementation(projects.modules.services.analytics.testing)
 }

@@ -1,5 +1,6 @@
 package au.com.shiftyjelly.pocketcasts.profile.cloud
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -27,8 +28,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.SimpleItemAnimator
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.compose.AppTheme
 import au.com.shiftyjelly.pocketcasts.compose.components.NoContentBanner
@@ -61,6 +60,16 @@ import au.com.shiftyjelly.pocketcasts.views.swipe.SwipeActionViewModel
 import au.com.shiftyjelly.pocketcasts.views.swipe.SwipeRowActions
 import au.com.shiftyjelly.pocketcasts.views.swipe.SwipeSource
 import au.com.shiftyjelly.pocketcasts.views.swipe.handleAction
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.UploadedFilesAddFileTappedEvent
+import com.automattic.eventhorizon.UploadedFilesModalOptionType
+import com.automattic.eventhorizon.UploadedFilesMultiSelectEnteredEvent
+import com.automattic.eventhorizon.UploadedFilesMultiSelectExitedEvent
+import com.automattic.eventhorizon.UploadedFilesOptionsButtonTappedEvent
+import com.automattic.eventhorizon.UploadedFilesOptionsModalOptionTappedEvent
+import com.automattic.eventhorizon.UploadedFilesSelectAllAboveTappedEvent
+import com.automattic.eventhorizon.UploadedFilesSelectAllBelowTappedEvent
+import com.automattic.eventhorizon.UploadedFilesSelectAllTappedEvent
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.lifecycle.withCreationCallback
 import javax.inject.Inject
@@ -79,7 +88,7 @@ class CloudFilesFragment :
 
     @Inject lateinit var multiSelectHelper: MultiSelectEpisodesHelper
 
-    @Inject lateinit var analyticsTracker: AnalyticsTracker
+    @Inject lateinit var eventHorizon: EventHorizon
 
     @Inject lateinit var swipeRowActionsFactory: SwipeRowActions.Factory
 
@@ -111,7 +120,12 @@ class CloudFilesFragment :
             artworkContext = Element.Files,
             onSwipeAction = { episode, swipeAction ->
                 viewLifecycleOwner.lifecycleScope.launch {
-                    swipeActionViewModel.handleAction(swipeAction, episode.uuid, childFragmentManager)
+                    swipeActionViewModel.handleAction(
+                        action = swipeAction,
+                        episodeUuid = episode.uuid,
+                        podcastUuid = episode.podcastOrSubstituteUuid,
+                        fragmentManager = childFragmentManager,
+                    )
                 }
             },
         )
@@ -145,6 +159,7 @@ class CloudFilesFragment :
         multiSelectHelper.isMultiSelecting = false
     }
 
+    @SuppressLint("MissingSuperCall") // False positive
     override fun onAttach(context: Context) {
         super.onAttach(context)
 
@@ -256,7 +271,7 @@ class CloudFilesFragment :
         }
 
         binding?.fab?.setOnClickListener {
-            analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_ADD_FILE_TAPPED)
+            eventHorizon.track(UploadedFilesAddFileTappedEvent)
             val intent = AddFileActivity.newFileChooser(it.context)
             startActivity(intent)
         }
@@ -270,11 +285,12 @@ class CloudFilesFragment :
             binding?.toolbar?.isVisible = !isMultiSelecting
             binding?.multiSelectToolbar?.setNavigationIcon(IR.drawable.ic_arrow_back)
 
-            if (isMultiSelecting) {
-                analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_MULTI_SELECT_ENTERED)
+            val event = if (isMultiSelecting) {
+                UploadedFilesMultiSelectEnteredEvent
             } else {
-                analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_MULTI_SELECT_EXITED)
+                UploadedFilesMultiSelectExitedEvent
             }
+            eventHorizon.track(event)
 
             adapter.notifyItemRangeChanged(0, adapter.itemCount, MULTI_SELECT_TOGGLE_PAYLOAD)
         }
@@ -284,7 +300,11 @@ class CloudFilesFragment :
                 if (episodes != null) {
                     multiSelectHelper.selectAllInList(episodes)
                     adapter.notifyDataSetChanged()
-                    analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_SELECT_ALL_TAPPED, mapOf(SELECT_ALL_KEY to true))
+                    eventHorizon.track(
+                        UploadedFilesSelectAllTappedEvent(
+                            selectAll = true,
+                        ),
+                    )
                 }
             }
 
@@ -293,7 +313,11 @@ class CloudFilesFragment :
                 if (episodes != null) {
                     multiSelectHelper.deselectAllInList(episodes)
                     adapter.notifyDataSetChanged()
-                    analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_SELECT_ALL_TAPPED, mapOf(SELECT_ALL_KEY to false))
+                    eventHorizon.track(
+                        UploadedFilesSelectAllTappedEvent(
+                            selectAll = false,
+                        ),
+                    )
                 }
             }
 
@@ -306,7 +330,7 @@ class CloudFilesFragment :
                     }
 
                     adapter.notifyDataSetChanged()
-                    analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_SELECT_ALL_ABOVE_TAPPED)
+                    eventHorizon.track(UploadedFilesSelectAllAboveTappedEvent)
                 }
             }
 
@@ -319,7 +343,7 @@ class CloudFilesFragment :
                     }
 
                     adapter.notifyDataSetChanged()
-                    analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_SELECT_ALL_BELOW_TAPPED)
+                    eventHorizon.track(UploadedFilesSelectAllBelowTappedEvent)
                 }
             }
 
@@ -355,7 +379,7 @@ class CloudFilesFragment :
     override fun onMenuItemClick(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.menu_options -> {
-                analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_OPTIONS_BUTTON_TAPPED)
+                eventHorizon.track(UploadedFilesOptionsButtonTappedEvent)
                 showOptionsDialog()
                 true
             }
@@ -370,7 +394,11 @@ class CloudFilesFragment :
                 titleId = LR.string.sort_by,
                 imageId = IR.drawable.ic_sort,
                 click = {
-                    analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_OPTIONS_MODAL_OPTION_TAPPED, mapOf(OPTION_KEY to SORT_BY))
+                    eventHorizon.track(
+                        UploadedFilesOptionsModalOptionTappedEvent(
+                            option = UploadedFilesModalOptionType.SortBy,
+                        ),
+                    )
                     showSortOptions()
                 },
             )
@@ -378,7 +406,11 @@ class CloudFilesFragment :
                 titleId = LR.string.profile_cloud_settings,
                 imageId = IR.drawable.ic_profile_settings,
                 click = {
-                    analyticsTracker.track(AnalyticsEvent.UPLOADED_FILES_OPTIONS_MODAL_OPTION_TAPPED, mapOf(OPTION_KEY to FILE_SETTINGS))
+                    eventHorizon.track(
+                        UploadedFilesOptionsModalOptionTappedEvent(
+                            option = UploadedFilesModalOptionType.FileSettings,
+                        ),
+                    )
                     showCloudSettings()
                 },
             )

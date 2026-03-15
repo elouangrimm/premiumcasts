@@ -2,7 +2,6 @@ package au.com.shiftyjelly.pocketcasts.wear.ui.episode
 
 import android.app.Application
 import android.content.Context
-import android.graphics.drawable.BitmapDrawable
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
@@ -10,18 +9,19 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.palette.graphics.Palette
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.EpisodeAnalytics
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
+import au.com.shiftyjelly.pocketcasts.coroutines.flow.combine
 import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
+import au.com.shiftyjelly.pocketcasts.models.type.EpisodeDownloadStatus
 import au.com.shiftyjelly.pocketcasts.models.type.EpisodePlayingStatus
-import au.com.shiftyjelly.pocketcasts.models.type.EpisodeStatusEnum
 import au.com.shiftyjelly.pocketcasts.profile.cloud.AddFileActivity
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadManager
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadProgressCache
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadQueue
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadType
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
 import au.com.shiftyjelly.pocketcasts.repositories.playback.UpNextPosition
 import au.com.shiftyjelly.pocketcasts.repositories.playback.UpNextQueue
@@ -32,13 +32,19 @@ import au.com.shiftyjelly.pocketcasts.repositories.shownotes.ShowNotesManager
 import au.com.shiftyjelly.pocketcasts.servers.shownotes.ShowNotesState
 import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
 import au.com.shiftyjelly.pocketcasts.ui.theme.ThemeColor
-import au.com.shiftyjelly.pocketcasts.utils.extensions.combine
 import au.com.shiftyjelly.pocketcasts.views.helper.CloudDeleteHelper
 import au.com.shiftyjelly.pocketcasts.wear.ui.player.AudioOutputSelectorHelper
 import au.com.shiftyjelly.pocketcasts.wear.ui.player.StreamingConfirmationScreen
-import coil.ImageLoader
-import coil.request.ImageRequest
-import coil.request.SuccessResult
+import coil3.ImageLoader
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.toBitmap
+import com.automattic.eventhorizon.EpisodeArchivedEvent
+import com.automattic.eventhorizon.EpisodeMarkedAsPlayedEvent
+import com.automattic.eventhorizon.EpisodeMarkedAsUnplayedEvent
+import com.automattic.eventhorizon.EpisodeUnarchivedEvent
+import com.automattic.eventhorizon.EventHorizon
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -52,6 +58,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.flatMapLatest
@@ -61,7 +68,6 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.rx2.asFlow
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import au.com.shiftyjelly.pocketcasts.images.R as IR
@@ -71,8 +77,9 @@ import au.com.shiftyjelly.pocketcasts.localization.R as LR
 @HiltViewModel
 class EpisodeViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val downloadManager: DownloadManager,
-    private val episodeAnalytics: EpisodeAnalytics,
+    private val downloadQueue: DownloadQueue,
+    private val downloadProgressCache: DownloadProgressCache,
+    private val eventHorizon: EventHorizon,
     private val episodeManager: EpisodeManager,
     private val playbackManager: PlaybackManager,
     private val podcastManager: PodcastManager,
@@ -148,9 +155,10 @@ class EpisodeViewModel @Inject constructor(
 
         val inUpNextFlow = playbackManager.upNextQueue.changesObservable.asFlow()
 
-        val downloadProgressFlow = downloadManager
-            .episodeDownloadProgressFlow(episodeUuid)
-            .map { it.downloadProgress }
+        val downloadProgressFlow = downloadProgressCache
+            .progressFlow(episodeUuid)
+            .map { progress -> (progress?.percentage?.toFloat() ?: 0f) / 100 }
+            .distinctUntilChanged()
 
         val showNotesFlow = episodeFlow
             .flatMapLatest {
@@ -171,7 +179,7 @@ class EpisodeViewModel @Inject constructor(
             podcastFlow.onStart { emit(null) },
             isPlayingEpisodeFlow.onStart { emit(false) },
             inUpNextFlow,
-            downloadProgressFlow.onStart { emit(0f) },
+            downloadProgressFlow,
             showNotesFlow,
         ) { episode, podcast, isPlayingEpisode, upNext, downloadProgress, showNotesState ->
 
@@ -193,21 +201,23 @@ class EpisodeViewModel @Inject constructor(
         val errorIconRes: Int?
         var errorDescription: String? = null
 
-        val episodeStatus = episode.episodeStatus
+        val episodeStatus = episode.downloadStatus
         if (episode.playErrorDetails == null) {
             errorTitleRes = when (episodeStatus) {
-                EpisodeStatusEnum.DOWNLOAD_FAILED -> LR.string.podcasts_download_failed
-                EpisodeStatusEnum.WAITING_FOR_WIFI -> LR.string.podcasts_download_wifi
-                EpisodeStatusEnum.WAITING_FOR_POWER -> LR.string.podcasts_download_power
+                EpisodeDownloadStatus.DownloadFailed -> LR.string.podcasts_download_failed
+                EpisodeDownloadStatus.WaitingForWifi -> LR.string.podcasts_download_wifi
+                EpisodeDownloadStatus.WaitingForPower -> LR.string.podcasts_download_power
+                EpisodeDownloadStatus.WaitingForStorage -> LR.string.podcasts_download_storage
                 else -> null
             }
-            if (episodeStatus == EpisodeStatusEnum.DOWNLOAD_FAILED) {
+            if (episodeStatus == EpisodeDownloadStatus.DownloadFailed) {
                 errorDescription = episode.downloadErrorDetails
             }
             errorIconRes = when (episodeStatus) {
-                EpisodeStatusEnum.DOWNLOAD_FAILED -> IR.drawable.ic_failedwarning
-                EpisodeStatusEnum.WAITING_FOR_WIFI -> IR.drawable.ic_waitingforwifi
-                EpisodeStatusEnum.WAITING_FOR_POWER -> IR.drawable.ic_waitingforpower
+                EpisodeDownloadStatus.DownloadFailed -> IR.drawable.ic_failedwarning
+                EpisodeDownloadStatus.WaitingForWifi -> IR.drawable.ic_waitingforwifi
+                EpisodeDownloadStatus.WaitingForPower -> IR.drawable.ic_waitingforpower
+                EpisodeDownloadStatus.WaitingForStorage -> IR.drawable.ic_waitingforstorage
                 else -> null
             }
         } else {
@@ -255,75 +265,35 @@ class EpisodeViewModel @Inject constructor(
     fun downloadEpisode() {
         val episode = (stateFlow.value as? State.Loaded)?.episode ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val fromString = "wear episode screen"
-            clearErrors(episode)
-            if (episode.downloadTaskId != null) {
-                when (episode) {
-                    is PodcastEpisode -> {
-                        episodeManager.stopDownloadAndCleanUp(episode, fromString)
-                    }
-
-                    is UserEpisode -> {
-                        downloadManager.removeEpisodeFromQueue(episode, fromString)
-                    }
-                }
-
-                episodeAnalytics.trackEvent(
-                    event = AnalyticsEvent.EPISODE_DOWNLOAD_CANCELLED,
-                    source = sourceView,
-                    uuid = episode.uuid,
-                )
-            } else if (!episode.isDownloaded) {
-                episode.autoDownloadStatus =
-                    PodcastEpisode.AUTO_DOWNLOAD_STATUS_MANUAL_OVERRIDE_WIFI
-                downloadManager.addEpisodeToQueue(episode, fromString, fireEvent = true, source = sourceView)
-
-                episodeAnalytics.trackEvent(
-                    event = AnalyticsEvent.EPISODE_DOWNLOAD_QUEUED,
-                    source = sourceView,
-                    uuid = episode.uuid,
-                )
-            }
-        }
-    }
-
-    private suspend fun clearErrors(episode: BaseEpisode) {
-        withContext(Dispatchers.IO) {
-            if (episode is PodcastEpisode) {
-                episodeManager.clearDownloadErrorBlocking(episode)
-            }
             episodeManager.clearPlaybackErrorBlocking(episode)
+            if (episode.isDownloadCancellable) {
+                downloadQueue.cancel(episode.uuid, sourceView)
+            } else if (!episode.isDownloaded) {
+                downloadQueue.enqueue(episode.uuid, DownloadType.UserTriggered(waitForWifi = false), sourceView)
+            }
         }
     }
 
     fun deleteDownloadedEpisode() {
         val episode = (stateFlow.value as? State.Loaded)?.episode ?: return
         viewModelScope.launch(Dispatchers.IO) {
+            episodeManager.disableAutoDownload(episode)
             when (episode) {
                 is PodcastEpisode -> {
-                    episodeManager.deleteEpisodeFile(
-                        episode,
-                        playbackManager,
-                        disableAutoDownload = true,
-                    )
+                    downloadQueue.cancel(episode.uuid, sourceView)
                 }
 
                 is UserEpisode -> {
                     CloudDeleteHelper.deleteEpisode(
                         episode = episode,
+                        sourceView = sourceView,
                         playbackManager = playbackManager,
-                        episodeManager = episodeManager,
+                        downloadQueue = downloadQueue,
                         userEpisodeManager = userEpisodeManager,
                         applicationScope = applicationScope,
                     )
                 }
             }
-
-            episodeAnalytics.trackEvent(
-                event = AnalyticsEvent.EPISODE_DOWNLOAD_DELETED,
-                source = sourceView,
-                uuid = episode.uuid,
-            )
         }
     }
 
@@ -345,11 +315,10 @@ class EpisodeViewModel @Inject constructor(
     }
 
     private fun play() {
-        val episode = (stateFlow.value as? State.Loaded)?.episode
-            ?: return
+        val episode = (stateFlow.value as? State.Loaded)?.episode ?: return
         viewModelScope.launch {
-            if (episode.playErrorDetails != null || episode.downloadErrorDetails != null) {
-                clearErrors(episode)
+            if (episode.playErrorDetails != null) {
+                episodeManager.clearPlaybackErrorBlocking(episode)
             }
             playbackManager.playNowSync(
                 episode = episode,
@@ -416,21 +385,20 @@ class EpisodeViewModel @Inject constructor(
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            if (episode.isArchived) {
+            val event = if (episode.isArchived) {
                 episodeManager.unarchiveBlocking(episode)
-                episodeAnalytics.trackEvent(
-                    AnalyticsEvent.EPISODE_UNARCHIVED,
-                    sourceView,
-                    episode.uuid,
+                EpisodeUnarchivedEvent(
+                    episodeUuid = episode.uuid,
+                    source = sourceView.eventHorizonValue,
                 )
             } else {
                 episodeManager.archiveBlocking(episode, playbackManager)
-                episodeAnalytics.trackEvent(
-                    AnalyticsEvent.EPISODE_ARCHIVED,
-                    sourceView,
-                    episode.uuid,
+                EpisodeArchivedEvent(
+                    episodeUuid = episode.uuid,
+                    source = sourceView.eventHorizonValue,
                 )
             }
+            eventHorizon.track(event)
         }
     }
 
@@ -452,12 +420,18 @@ class EpisodeViewModel @Inject constructor(
             (stateFlow.value as? State.Loaded)?.episode?.let { episode ->
                 val event = if (episode.playingStatus == EpisodePlayingStatus.COMPLETED) {
                     episodeManager.markAsNotPlayedBlocking(episode)
-                    AnalyticsEvent.EPISODE_MARKED_AS_UNPLAYED
+                    EpisodeMarkedAsUnplayedEvent(
+                        episodeUuid = episode.uuid,
+                        source = sourceView.eventHorizonValue,
+                    )
                 } else {
                     episodeManager.markAsPlayedBlocking(episode, playbackManager, podcastManager)
-                    AnalyticsEvent.EPISODE_MARKED_AS_PLAYED
+                    EpisodeMarkedAsPlayedEvent(
+                        episodeUuid = episode.uuid,
+                        source = sourceView.eventHorizonValue,
+                    )
                 }
-                episodeAnalytics.trackEvent(event, sourceView, episode.uuid)
+                eventHorizon.track(event)
             }
         }
     }
@@ -472,9 +446,7 @@ class EpisodeViewModel @Inject constructor(
 
         val successResult = loader.execute(request) as? SuccessResult
             ?: return@let null
-        val resultDrawable = successResult.drawable as? BitmapDrawable
-            ?: return@let null
-        val bitmap = resultDrawable.bitmap
+        val bitmap = successResult.image.toBitmap()
 
         // Set a timeout to make sure the user isn't blocked for too long just
         // because we're trying to extract a tint color.

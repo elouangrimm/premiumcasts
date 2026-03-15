@@ -2,13 +2,17 @@ package au.com.shiftyjelly.pocketcasts.account.viewmodel
 
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.sync.LoginResult
+import au.com.shiftyjelly.pocketcasts.repositories.sync.SignInSource
 import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.utils.Util
+import com.automattic.eventhorizon.AccountUpdatedDismissedEvent
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.NewsletterOptInChangedEvent
+import com.automattic.eventhorizon.NewsletterSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.reactivex.disposables.CompositeDisposable
 import javax.inject.Inject
@@ -20,6 +24,7 @@ class CreateAccountViewModel
     private val syncManager: SyncManager,
     private val settings: Settings,
     private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     private val podcastManager: PodcastManager,
 ) : AccountViewModel() {
 
@@ -83,9 +88,11 @@ class CreateAccountViewModel
     }
 
     fun updateNewsletter(isChecked: Boolean) {
-        analyticsTracker.track(
-            AnalyticsEvent.NEWSLETTER_OPT_IN_CHANGED,
-            mapOf(SOURCE_KEY to NewsletterSource.ACCOUNT_UPDATED.analyticsValue, ENABLED_KEY to isChecked),
+        eventHorizon.track(
+            NewsletterOptInChangedEvent(
+                source = NewsletterSource.AccountUpdated,
+                enabled = isChecked,
+            ),
         )
         newsletter.value = isChecked
         newsletter.value?.let {
@@ -128,7 +135,7 @@ class CreateAccountViewModel
         createAccountState.postValue(CreateAccountState.AccountCreating)
 
         viewModelScope.launch {
-            when (val result = syncManager.createUserWithEmailAndPassword(emailString, passwordString)) {
+            when (val result = syncManager.createUserWithEmailAndPassword(emailString, passwordString, SignInSource.UserInitiated.SignInViewModel)) {
                 is LoginResult.Success -> {
                     analyticsTracker.refreshMetadata()
                     podcastManager.refreshPodcastsAfterSignIn()
@@ -145,19 +152,13 @@ class CreateAccountViewModel
     }
 
     fun onCloseDoneForm() {
-        analyticsTracker.track(AnalyticsEvent.ACCOUNT_UPDATED_DISMISSED)
+        eventHorizon.track(AccountUpdatedDismissedEvent)
     }
 
     override fun onCleared() {
         super.onCleared()
         disposables.clear()
     }
-}
-
-enum class NewsletterSource(val analyticsValue: String) {
-    ACCOUNT_UPDATED("account_updated"),
-    PROFILE("profile"),
-    WELCOME_NEW_ACCOUNT("welcome_new_account"),
 }
 
 enum class SubscriptionType(val value: String) {

@@ -1,7 +1,9 @@
 package au.com.shiftyjelly.pocketcasts.repositories.di
 
+import android.content.Context
 import androidx.work.WorkerFactory
 import au.com.shiftyjelly.pocketcasts.analytics.AccountStatusInfo
+import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.crashlogging.CrashReportPermissionCheck
 import au.com.shiftyjelly.pocketcasts.crashlogging.ObserveUser
 import au.com.shiftyjelly.pocketcasts.models.to.TranscriptType
@@ -10,6 +12,7 @@ import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.SettingsImpl
 import au.com.shiftyjelly.pocketcasts.repositories.ads.BlazeAdsManager
 import au.com.shiftyjelly.pocketcasts.repositories.ads.BlazeAdsManagerImpl
+import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewAnalyticsListener
 import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewManager
 import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.bookmark.BookmarkManager
@@ -17,7 +20,8 @@ import au.com.shiftyjelly.pocketcasts.repositories.bookmark.BookmarkManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.chromecast.CastManager
 import au.com.shiftyjelly.pocketcasts.repositories.chromecast.CastManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadManager
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadManagerImpl
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadQueue
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadStatusObserver
 import au.com.shiftyjelly.pocketcasts.repositories.endofyear.EndOfYearManager
 import au.com.shiftyjelly.pocketcasts.repositories.endofyear.EndOfYearManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.endofyear.EndOfYearSync
@@ -48,8 +52,6 @@ import au.com.shiftyjelly.pocketcasts.repositories.podcast.FolderManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.FolderManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManagerImpl
-import au.com.shiftyjelly.pocketcasts.repositories.podcast.SmartPlaylistManager
-import au.com.shiftyjelly.pocketcasts.repositories.podcast.SmartPlaylistManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.ratings.RatingsManager
@@ -83,13 +85,17 @@ import au.com.shiftyjelly.pocketcasts.repositories.user.StatsManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManagerImpl
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserSettingsCrashReportPermission
+import com.google.android.play.core.review.ReviewManager
+import com.google.android.play.core.review.ReviewManagerFactory
 import com.squareup.moshi.Moshi
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoMap
+import dagger.multibindings.IntoSet
 import javax.inject.Singleton
 
 @Module
@@ -134,10 +140,6 @@ abstract class RepositoryModule {
 
     @Binds
     @Singleton
-    abstract fun providesSmartPlaylistManager(smartPlaylistManagerImpl: SmartPlaylistManagerImpl): SmartPlaylistManager
-
-    @Binds
-    @Singleton
     abstract fun providesBookmarkManager(bookmarkManager: BookmarkManagerImpl): BookmarkManager
 
     @Binds
@@ -147,10 +149,6 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun providesUpNextQueue(upNextQueueImpl: UpNextQueueImpl): UpNextQueue
-
-    @Binds
-    @Singleton
-    abstract fun providesDownloadManager(downloadManagerImpl: DownloadManagerImpl): DownloadManager
 
     @Binds
     @Singleton
@@ -237,6 +235,16 @@ abstract class RepositoryModule {
     @Binds
     abstract fun provideAppReviewManager(appReviewManagerImpl: AppReviewManagerImpl): AppReviewManager
 
+    @Binds
+    @IntoSet
+    abstract fun provideAppReviewAnalyticsListener(appReviewAnalyticsListener: AppReviewAnalyticsListener): AnalyticsTracker.Listener
+
+    @Binds
+    abstract fun provideDownloadQueue(manager: DownloadManager): DownloadQueue
+
+    @Binds
+    abstract fun provideDownloadStatusObserver(manager: DownloadManager): DownloadStatusObserver
+
     companion object {
         @Provides
         @IntoMap
@@ -264,6 +272,12 @@ abstract class RepositoryModule {
         @TranscriptTypeKey(TranscriptType.Html)
         fun provideHtmlParser(): TranscriptParser {
             return HtmlParser()
+        }
+
+        @Provides
+        @Singleton
+        fun provideGoogleReviewManager(@ApplicationContext context: Context): ReviewManager {
+            return ReviewManagerFactory.create(context)
         }
     }
 }

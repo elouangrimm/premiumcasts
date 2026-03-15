@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import au.com.shiftyjelly.pocketcasts.repositories.images.PocketCastsImageRequestFactory
 import au.com.shiftyjelly.pocketcasts.repositories.images.PocketCastsImageRequestFactory.PlaceholderType
 import au.com.shiftyjelly.pocketcasts.ui.extensions.themed
-import coil.compose.rememberAsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
 import au.com.shiftyjelly.pocketcasts.localization.R as LR
 
 fun podcastImageCornerSize(width: Dp): Dp {
@@ -36,11 +36,26 @@ fun podcastImageCornerSize(width: Dp): Dp {
     }
 }
 
+/**
+ * Displays a podcast artwork image with rounded corners and optional shadow.
+ *
+ * @param uuid Podcast uuid.
+ * @param modifier The modifier to be applied to the image.
+ * @param imageSize The display size of the image in both width and height.
+ * @param imageRequestSize The resolution to load from network/cache. Defaults to [imageSize].
+ * Set to a fixed size when [imageSize] is animated to prevent reloading.
+ * @param cornerSize The corner radius for rounding the image. Set to null for a rectangle shape.
+ * @param elevation The shadow elevation applied to the image. Set to null to disable the shadow.
+ * @param placeholderType The type of placeholder to show while the image is loading.
+ * Automatically uses [PlaceholderType.Large] for images larger than 200.dp.
+ * @param contentDescription The accessibility description for the image.
+ */
 @Composable
 fun PodcastImage(
     uuid: String,
     modifier: Modifier = Modifier,
     imageSize: Dp = 56.dp,
+    imageRequestSize: Dp = imageSize,
     cornerSize: Dp? = imageSize / 14,
     elevation: Dp? = 2.dp,
     placeholderType: PlaceholderType = if (imageSize > 200.dp) {
@@ -48,10 +63,15 @@ fun PodcastImage(
     } else {
         PlaceholderType.Small
     },
+    contentDescription: String? = stringResource(LR.string.podcast_artwork_description),
 ) {
     val context = LocalContext.current
-    val imageRequest = remember(uuid, placeholderType) {
-        PocketCastsImageRequestFactory(context, placeholderType = placeholderType).themed().createForPodcast(uuid)
+    val imageRequest = remember(uuid, placeholderType, imageRequestSize) {
+        PocketCastsImageRequestFactory(
+            context = context,
+            placeholderType = placeholderType,
+            size = imageRequestSize.value.toInt(),
+        ).themed().createForPodcast(uuid)
     }
     val shape = if (cornerSize != null) {
         RoundedCornerShape(cornerSize)
@@ -61,7 +81,7 @@ fun PodcastImage(
     Image(
         painter = rememberAsyncImagePainter(imageRequest, contentScale = ContentScale.Crop),
         contentScale = ContentScale.Crop,
-        contentDescription = stringResource(LR.string.podcast_artwork_description),
+        contentDescription = contentDescription,
         modifier = modifier
             .size(imageSize)
             .then(
@@ -89,18 +109,22 @@ fun PodcastImageDeprecated(
     placeholderType: PlaceholderType = PlaceholderType.Large,
 ) {
     val context = LocalContext.current
-
-    val imageRequest = remember(uuid) {
-        PocketCastsImageRequestFactory(context, placeholderType = placeholderType).themed().createForPodcast(uuid)
-    }
-
+    val contentDescriptionString = stringResource(LR.string.podcast_artwork_description)
     BoxWithConstraints(
         modifier = modifier
             .semantics(mergeDescendants = true) {
                 role = Role.Image
-                contentDescription = context.getString(LR.string.podcast_artwork_description)
+                contentDescription = contentDescriptionString
             },
     ) {
+        val imageRequest = remember(uuid, maxWidth) {
+            PocketCastsImageRequestFactory(
+                context = context,
+                size = maxWidth.value.toInt(),
+                placeholderType = placeholderType,
+            ).themed().createForPodcast(uuid)
+        }
+
         val corners = if (roundCorners) cornerSize ?: podcastImageCornerSize(maxWidth) else null
         if (dropShadow) {
             val finalElevation = elevation ?: when {

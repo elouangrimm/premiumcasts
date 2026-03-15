@@ -2,15 +2,25 @@ package au.com.shiftyjelly.pocketcasts.playlists
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.coroutines.flow.combine
 import au.com.shiftyjelly.pocketcasts.playlists.component.PlaylistTooltip
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.Playlist
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistManager
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistPreview
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
-import au.com.shiftyjelly.pocketcasts.utils.extensions.combine
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.FilterCreateButtonTappedEvent
+import com.automattic.eventhorizon.FilterDeleteDismissedEvent
+import com.automattic.eventhorizon.FilterDeleteTriggeredEvent
+import com.automattic.eventhorizon.FilterDeletedEvent
+import com.automattic.eventhorizon.FilterListReorderedEvent
+import com.automattic.eventhorizon.FilterListShownEvent
+import com.automattic.eventhorizon.FilterTooltipClosedEvent
+import com.automattic.eventhorizon.FilterTooltipShownEvent
+import com.automattic.eventhorizon.InformationalBannerViewCreateAccountTapEvent
+import com.automattic.eventhorizon.InformationalBannerViewDismissedEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
@@ -19,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.WhileSubscribed
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.reactive.asFlow
@@ -28,7 +39,7 @@ class PlaylistsViewModel @Inject constructor(
     private val playlistManager: PlaylistManager,
     private val userManager: UserManager,
     private val settings: Settings,
-    private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
 ) : ViewModel() {
     private val showFreeAccountBanner = combine(
         settings.isFreeAccountFiltersBannerDismissed.flow,
@@ -40,7 +51,7 @@ class PlaylistsViewModel @Inject constructor(
     internal val uiState = combine(
         playlistManager.playlistPreviewsFlow(),
         settings.showPlaylistsOnboarding.flow,
-        showFreeAccountBanner,
+        showFreeAccountBanner.onStart { emit(false) },
         settings.showPremadePlaylistsTooltip.flow,
         settings.showRearrangePlaylistsTooltip.flow,
         settings.bottomInset,
@@ -111,52 +122,67 @@ class PlaylistsViewModel @Inject constructor(
     }
 
     fun trackPlaylistsShown(playlistCount: Int) {
-        analyticsTracker.track(AnalyticsEvent.FILTER_LIST_SHOWN, mapOf("filter_count" to playlistCount))
+        eventHorizon.track(
+            FilterListShownEvent(
+                filterCount = playlistCount.toLong(),
+            ),
+        )
     }
 
     fun trackPlaylistsReordered() {
-        analyticsTracker.track(AnalyticsEvent.FILTER_LIST_REORDERED)
+        eventHorizon.track(FilterListReorderedEvent)
     }
 
     fun trackPlaylistDeleteTriggered(playlist: PlaylistPreview) {
-        analyticsTracker.track(
-            AnalyticsEvent.FILTER_DELETE_TRIGGERED,
-            mapOf("filter_type" to playlist.type.analyticsValue),
+        eventHorizon.track(
+            FilterDeleteTriggeredEvent(
+                filterType = playlist.type.eventHorizonValue,
+            ),
         )
     }
 
     fun trackPlaylistDeleteDismissed(playlist: PlaylistPreview) {
-        analyticsTracker.track(
-            AnalyticsEvent.FILTER_DELETE_DISMISSED,
-            mapOf("filter_type" to playlist.type.analyticsValue),
+        eventHorizon.track(
+            FilterDeleteDismissedEvent(
+                filterType = playlist.type.eventHorizonValue,
+            ),
         )
     }
 
     fun trackPlaylistDeleted(playlist: PlaylistPreview) {
-        analyticsTracker.track(
-            AnalyticsEvent.FILTER_DELETED,
-            mapOf("filter_type" to playlist.type.analyticsValue),
+        eventHorizon.track(
+            FilterDeletedEvent(
+                filterType = playlist.type.eventHorizonValue,
+            ),
         )
     }
 
     fun trackCreatePlaylistClicked() {
-        analyticsTracker.track(AnalyticsEvent.FILTER_CREATE_BUTTON_TAPPED)
+        eventHorizon.track(FilterCreateButtonTappedEvent)
     }
 
     fun trackTooltipShown() {
-        analyticsTracker.track(AnalyticsEvent.FILTER_TOOLTIP_SHOWN)
+        eventHorizon.track(FilterTooltipShownEvent)
     }
 
     fun trackTooltipDismissed() {
-        analyticsTracker.track(AnalyticsEvent.FILTER_TOOLTIP_CLOSED)
+        eventHorizon.track(FilterTooltipClosedEvent)
     }
 
     fun trackFreeAccountCtaClicked() {
-        analyticsTracker.track(AnalyticsEvent.INFORMATIONAL_BANNER_VIEW_CREATE_ACCOUNT_TAP, mapOf("source" to "filters"))
+        eventHorizon.track(
+            InformationalBannerViewCreateAccountTapEvent(
+                source = SourceView.FILTERS.eventHorizonValue,
+            ),
+        )
     }
 
     fun trackFreeAccountBannerDismissed() {
-        analyticsTracker.track(AnalyticsEvent.INFORMATIONAL_BANNER_VIEW_DISMISSED, mapOf("source" to "filters"))
+        eventHorizon.track(
+            InformationalBannerViewDismissedEvent(
+                source = SourceView.FILTERS.eventHorizonValue,
+            ),
+        )
     }
 
     private fun shouldShowPremadePlaylistsTooltip(

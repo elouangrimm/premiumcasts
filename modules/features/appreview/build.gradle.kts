@@ -1,9 +1,9 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.kotlin.parcelize)
 }
 
 android {
@@ -33,5 +33,6 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.fragment.compose)
     implementation(libs.fragment.ktx)
+    implementation(libs.lottie.compose)
     implementation(libs.timber)
 }

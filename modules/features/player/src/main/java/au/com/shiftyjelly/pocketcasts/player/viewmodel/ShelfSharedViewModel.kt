@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
@@ -12,10 +13,9 @@ import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.model.ShelfItem
 import au.com.shiftyjelly.pocketcasts.repositories.chromecast.ChromeCastAnalytics
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadQueue
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
 import au.com.shiftyjelly.pocketcasts.repositories.playback.UpNextQueue
-import au.com.shiftyjelly.pocketcasts.repositories.podcast.ChapterManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
@@ -24,6 +24,10 @@ import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingUpgradeSourc
 import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
 import au.com.shiftyjelly.pocketcasts.views.helper.CloudDeleteHelper
 import au.com.shiftyjelly.pocketcasts.views.helper.DeleteState
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.PlayerShelfActionTappedEvent
+import com.automattic.eventhorizon.PlayerShelfOverflowMenuShownEvent
+import com.automattic.eventhorizon.ShelfActionSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.reactivex.Observable
 import io.reactivex.schedulers.Schedulers
@@ -48,14 +52,15 @@ import kotlinx.coroutines.rx2.asFlow
 class ShelfSharedViewModel @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     private val chromeCastAnalytics: ChromeCastAnalytics,
     private val episodeManager: EpisodeManager,
-    private val chapterManager: ChapterManager,
     private val playbackManager: PlaybackManager,
     podcastManager: PodcastManager,
     private val settings: Settings,
     private val userEpisodeManager: UserEpisodeManager,
     private val transcriptManager: TranscriptManager,
+    private val downloadQueue: DownloadQueue,
 ) : ViewModel() {
     private val upNextStateObservable: Observable<UpNextQueue.State> =
         playbackManager.upNextQueue.getChangesObservableWithLiveCurrentEpisode(
@@ -73,7 +78,7 @@ class ShelfSharedViewModel @Inject constructor(
 
             oldPodcastEpisode?.uuid == newPodcastEpisode?.uuid &&
                 oldPodcastEpisode?.isStarred == newPodcastEpisode?.isStarred &&
-                oldLoaded.episode.episodeStatus == newLoaded.episode.episodeStatus &&
+                oldLoaded.episode.downloadStatus == newLoaded.episode.downloadStatus &&
                 oldLoaded.podcast?.isUsingEffects == newLoaded.podcast?.isUsingEffects
         }
 
@@ -245,16 +250,21 @@ class ShelfSharedViewModel @Inject constructor(
                 _navigationState.emit(
                     NavigationState.ShowPodcastEpisodeArchiveConfirmation(
                         episode,
-                    ) { onArchiveConfirmed(episode) },
+                    ) {
+                        launch { episodeManager.disableAutoDownload(episode) }
+                        onArchiveConfirmed(episode)
+                    },
                 )
             } else if (episode is UserEpisode) {
                 val deleteState = CloudDeleteHelper.getDeleteState(episode)
-                val deleteFunction: (UserEpisode, DeleteState) -> Unit = { ep, delState ->
+                val deleteFunction: (UserEpisode, DeleteState) -> Unit = { episode, deleteState ->
+                    launch { episodeManager.disableAutoDownload(episode) }
                     CloudDeleteHelper.deleteEpisode(
-                        episode = ep,
-                        deleteState = delState,
+                        episode = episode,
+                        deleteState = deleteState,
+                        sourceView = SourceView.PLAYER,
+                        downloadQueue = downloadQueue,
                         playbackManager = playbackManager,
-                        episodeManager = episodeManager,
                         userEpisodeManager = userEpisodeManager,
                         applicationScope = applicationScope,
                     )
@@ -272,16 +282,22 @@ class ShelfSharedViewModel @Inject constructor(
 
     fun onAddToPlaylistClick(
         episodeUuid: String,
+        podcastUuid: String,
         source: ShelfItemSource,
     ) {
         trackShelfAction(ShelfItem.AddToPlaylist, source)
         viewModelScope.launch {
-            _navigationState.emit(NavigationState.AddEpisodeToPlaylist(episodeUuid))
+            _navigationState.emit(
+                NavigationState.AddEpisodeToPlaylist(
+                    episodeUuid = episodeUuid,
+                    podcastUuid = podcastUuid,
+                ),
+            )
         }
     }
 
     fun onMoreClick() {
-        track(AnalyticsEvent.PLAYER_SHELF_OVERFLOW_MENU_SHOWN)
+        eventHorizon.track(PlayerShelfOverflowMenuShownEvent)
         viewModelScope.launch {
             _navigationState.emit(NavigationState.ShowMoreActions)
         }
@@ -291,14 +307,10 @@ class ShelfSharedViewModel @Inject constructor(
         shelfItem: ShelfItem,
         shelfItemSource: ShelfItemSource,
     ) {
-        analyticsTracker.track(
-            AnalyticsEvent.PLAYER_SHELF_ACTION_TAPPED,
-            mapOf(
-                AnalyticsProp.FROM to when (shelfItemSource) {
-                    ShelfItemSource.Shelf -> AnalyticsProp.SHELF
-                    ShelfItemSource.OverflowMenu -> AnalyticsProp.OVERFLOW_MENU
-                },
-                AnalyticsProp.ACTION to shelfItem.analyticsValue,
+        eventHorizon.track(
+            PlayerShelfActionTappedEvent(
+                from = shelfItemSource.eventHorizonValue,
+                action = shelfItem.eventHorizonValue,
             ),
         )
         if (shelfItem == ShelfItem.Cast) {
@@ -363,7 +375,7 @@ class ShelfSharedViewModel @Inject constructor(
         data object ShowMoreActions : NavigationState
         data object ShowAddBookmark : NavigationState
         data class StartUpsellFlow(val source: OnboardingUpgradeSource) : NavigationState
-        data class AddEpisodeToPlaylist(val episodeUuid: String) : NavigationState
+        data class AddEpisodeToPlaylist(val episodeUuid: String, val podcastUuid: String) : NavigationState
     }
 
     sealed interface SnackbarMessage {
@@ -373,9 +385,15 @@ class ShelfSharedViewModel @Inject constructor(
         data object ShareNotAvailable : SnackbarMessage
     }
 
-    enum class ShelfItemSource {
-        Shelf,
-        OverflowMenu,
+    enum class ShelfItemSource(
+        val eventHorizonValue: ShelfActionSource,
+    ) {
+        Shelf(
+            eventHorizonValue = ShelfActionSource.Shelf,
+        ),
+        OverflowMenu(
+            eventHorizonValue = ShelfActionSource.OverflowMenu,
+        ),
     }
 
     companion object {

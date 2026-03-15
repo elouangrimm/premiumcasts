@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.parcelize)
@@ -20,13 +19,14 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     api(libs.androidx.appcompat)
-    api(libs.coil.base)
+    api(libs.coil)
     api(libs.dagger.hilt.android)
     api(libs.material)
     api(libs.okhttp)
     api(libs.rx2.java)
     api(libs.timber)
 
+    api(projects.modules.services.coroutines)
     api(projects.modules.services.payment)
 
     implementation(platform(libs.compose.bom))

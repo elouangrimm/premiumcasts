@@ -47,13 +47,13 @@ class DeveloperFragment : BaseFragment() {
                 onResetPlaylistsOnboarding = viewModel::resetPlaylistsOnboarding,
                 onResetNotificationsPrompt = viewModel::resetNotificationsPrompt,
                 onShowAppReviewPrompt = viewModel::showAppReviewPrompt,
+                onClearAppReviewSettings = viewModel::clearAppReviewSettings,
             )
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun onBackPress() {
-        activity?.onBackPressed()
+        activity?.onBackPressedDispatcher?.onBackPressed()
     }
 
     private fun onShowWhatsNewClick() {

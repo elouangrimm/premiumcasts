@@ -29,6 +29,7 @@ fun EndOfYearLaunchBottomSheet(
     parent: ViewGroup,
     onClick: () -> Unit,
     onExpand: () -> Unit,
+    onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
     shouldShow: Boolean = true,
 ) {
@@ -42,10 +43,11 @@ fun EndOfYearLaunchBottomSheet(
         sheetState = sheetState,
         shouldShow = shouldShow,
         onExpand = onExpand,
+        onCollapse = onCollapse,
         content = BottomSheetContentState.Content(
             imageContent = {
                 ImageContent(
-                    modifier = modifier.clickable {
+                    modifier = Modifier.clickable {
                         onClick()
                         scope.launch { sheetState.hide() }
                     },
@@ -57,6 +59,7 @@ fun EndOfYearLaunchBottomSheet(
                 onClick = onClick,
             ),
         ),
+        modifier = modifier,
     )
 }
 
@@ -69,7 +72,6 @@ private fun ImageContent(modifier: Modifier = Modifier) {
         Image(
             painter = painterResource(IR.drawable.playback_launch_banner),
             contentDescription = null,
-            colorFilter = MaterialTheme.theme.imageColorFilter,
             modifier = Modifier.clip(RoundedCornerShape(16.dp)),
         )
     }

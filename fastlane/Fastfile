@@ -108,27 +108,19 @@ platform :android do
     ensure_git_status_clean
     Fastlane::Helper::GitHelper.checkout_and_pull(DEFAULT_BRANCH)
 
-    # Use provided version from release tool, or fall back to computed version
-    computed_version = release_version_next
-    new_version = version || computed_version
-
-    # Warn if provided version differs from computed version
-    if version && version != computed_version
-      warning_message = <<~WARNING
-        ⚠️ Version mismatch: The explicitly-provided version was '#{version}' while new computed version would have been '#{computed_version}'.
-        If this is unexpected, you might want to investigate the discrepency.
-        Continuing with the explicitly-provided verison '#{version}'.
-      WARNING
-      UI.important(warning_message)
-      buildkite_annotate(style: 'warning', context: 'code-freeze-version-mismatch', message: warning_message) if is_ci
-    end
+    # If a new version is passed, use it as source of truth from now on
+    new_version = version || release_version_next
+    release_branch_name = "release/#{new_version}"
+    new_beta_version = beta_version_next(version_name: new_version)
+    new_build_code = build_code_next
 
     confirmation_message = <<-MESSAGE
 
       Code Freeze:
-      • New release branch from #{DEFAULT_BRANCH}: release/#{new_version}
+      • New release branch from #{DEFAULT_BRANCH}: #{release_branch_name}
+
       • Current release version and build code: #{release_version_current} (#{build_code_current}).
-      • New release version and build code: #{beta_version_code_freeze} (#{build_code_next}).
+      • New release version and build code: #{new_beta_version} (#{new_build_code}).
 
     MESSAGE
 
@@ -136,16 +128,17 @@ platform :android do
     UI.user_error!("Terminating as requested. Don't forget to run the remainder of this automation manually.") unless skip_confirm || UI.confirm('Do you want to continue?')
 
     # Create the release branch
+    ensure_branch_does_not_exist!(release_branch_name)
+
     UI.message('Creating release branch...')
-    release_branch_name = "release/#{new_version}"
     Fastlane::Helper::GitHelper.create_branch(release_branch_name, from: DEFAULT_BRANCH)
     UI.success("Done! New release branch is: #{git_branch}")
 
     # Bump the version and build code
     UI.message('Bumping beta version and build code...')
     VERSION_FILE.write_version(
-      version_name: beta_version_code_freeze,
-      version_code: build_code_next
+      version_name: new_beta_version,
+      version_code: new_build_code
     )
     commit_version_bump
     UI.success("Done! New Beta Version: #{beta_version_current}. New Build Code: #{build_code_current}")
@@ -262,17 +255,31 @@ platform :android do
 
     # Parse the provided version into an AppVersion object
     parsed_version = VERSION_FORMATTER.parse(new_version)
+    # Validate that this is a hotfix version (must have a patch component > 0)
+    UI.user_error!("Invalid hotfix version '#{new_version}'. Must include a patch number.") unless parsed_version.patch.to_i.positive?
     previous_version = VERSION_FORMATTER.release_version(VERSION_CALCULATOR.previous_patch_version(version: parsed_version))
+
+    release_branch_name = "release/#{new_version}"
+    previous_release_branch = "release/#{previous_version}"
+
+    # Determine the base for the hotfix branch: either a tag or a release branch
+    base_ref_for_hotfix = if git_tag_exists(tag: previous_version, remote: true)
+                            previous_version
+                          elsif Fastlane::Helper::GitHelper.branch_exists_on_remote?(branch_name: previous_release_branch)
+                            UI.message("ℹ️  Tag '#{previous_version}' not found on the remote. Using release branch '#{previous_release_branch}' as the base for hotfix instead.")
+                            previous_release_branch
+                          else
+                            UI.user_error!("Neither tag '#{previous_version}' nor branch '#{previous_release_branch}' exists on the remote! A hotfix branch cannot be created.")
+                          end
 
     # Check versions
     message = <<-MESSAGE
+      New hotfix branch from #{base_ref_for_hotfix}: #{release_branch_name}
 
       New hotfix version: #{new_version}
 
       Current build code: #{build_code_current}
       New build code: #{new_version_code}
-
-      Branching from tag: #{previous_version}
 
     MESSAGE
 
@@ -280,13 +287,17 @@ platform :android do
     UI.user_error!("Terminating as requested. Don't forget to run the remainder of this automation manually.") unless skip_confirm || UI.confirm('Do you want to continue?')
 
     # Check tags
-    UI.user_error!("The version `#{new_version}` tag already exists!") if git_tag_exists(tag: new_version)
-    UI.user_error!("Version #{previous_version} is not tagged! A hotfix branch cannot be created.") unless git_tag_exists(tag: previous_version)
+    UI.user_error!("Version '#{new_version}' already exists on the remote! Abort!") if git_tag_exists(tag: new_version, remote: true)
+
+    # Fetch the base ref to ensure it's available locally
+    sh('git', 'fetch', 'origin', base_ref_for_hotfix)
+
+    ensure_branch_does_not_exist!(release_branch_name)
 
     # Create the hotfix branch
-    UI.message('Creating hotfix branch...')
-    Fastlane::Helper::GitHelper.create_branch("release/#{new_version}", from: previous_version)
-    UI.success("Done! New hotfix branch is: #{git_branch}")
+    UI.message("Creating hotfix branch from '#{base_ref_for_hotfix}'...")
+    Fastlane::Helper::GitHelper.create_branch(release_branch_name, from: base_ref_for_hotfix)
+    UI.success("Done! New hotfix branch is: '#{git_branch}'")
 
     # Bump the hotfix version and build code and write it to the `version.properties` file
     UI.message('Bumping hotfix version and build code...')
@@ -296,7 +307,7 @@ platform :android do
     )
     commit_version_bump
     push_to_git_remote(set_upstream: true, tags: false)
-    UI.success("Done! New Release Version: #{release_version_current}. New Build Code: #{build_code_current}")
+    UI.success("Done! New Release Version: '#{release_version_current}'. New Build Code: '#{build_code_current}'")
   end
 
   # @param skip_confirm [Boolean] If true, avoids any interactive prompt
@@ -621,29 +632,81 @@ platform :android do
     )
   end
 
-  # Builds a prototype build and uploads it to S3
+  # Compiles prototype builds and uploads to FAD (app) and S3 (wear/automotive)
   #
   lane :build_and_upload_prototype_build do
+    firebase_account_key = ENV.fetch('FIREBASE_APP_DISTRIBUTION_ACCOUNT_KEY', nil)
+    UI.user_error!("'FIREBASE_APP_DISTRIBUTION_ACCOUNT_KEY' must be defined as an environment variable.") unless firebase_account_key
+
+    pr_number = pull_request_number
+    app_build_type = 'Prototype'
+    other_builds_type = 'DebugProd'
+    gradle_properties = { 'skipSentryProguardMappingUpload' => true }
+
+    # Build app and upload to FAD
+    gradle(
+      task: 'app:assemble',
+      build_type: app_build_type,
+      properties: gradle_properties
+    )
+
+    app_apk = lane_context[SharedValues::GRADLE_ALL_APK_OUTPUT_PATHS].first
+    UI.user_error!('No app APK found in Gradle output.') unless app_apk
+
+    release_notes = <<~NOTES
+      Pull Request: ##{pr_number || 'N/A'}
+      Branch: `#{ENV.fetch('BUILDKITE_BRANCH', 'N/A')}`
+      Commit: #{ENV.fetch('BUILDKITE_COMMIT', 'N/A')[0...7]}
+    NOTES
+
+    fad_release = firebase_app_distribution(
+      app: FIREBASE_APP_ID,
+      apk_path: app_apk,
+      service_credentials_json_data: firebase_account_key,
+      release_notes: release_notes,
+      groups: FIREBASE_TESTERS_GROUP
+    )
+
+    if pr_number
+      comment_on_pr(
+        project: GITHUB_REPO,
+        pr_number: pr_number,
+        reuse_identifier: 'prototype-build-fad',
+        body: prototype_build_details_comment(
+          app_display_name: get_app_display_name(apk_path: app_apk),
+          download_url: fad_release[:testingUri],
+          metadata: { 'Build Type': app_build_type },
+          fold: false
+        )
+      )
+    end
+
+    # Build wear/automotive and upload to S3 (PRs only)
+    next unless pr_number
+
     UI.user_error!("'BUILDKITE_ARTIFACTS_S3_BUCKET' must be defined as an environment variable.") unless ENV['BUILDKITE_ARTIFACTS_S3_BUCKET']
 
-    comment_on_pr(
-      project: 'automattic/pocket-casts-android',
-      pr_number: Integer(ENV.fetch('BUILDKITE_PULL_REQUEST', nil)),
-      reuse_identifier: 'app-prototype-build-link',
-      body: '🚧 Prototype builds will be available soon'
-    )
+    other_platforms = %w[wear automotive]
 
-    prototype_build_type = 'DebugProd'
+    other_apks = []
+    other_platforms.each do |platform|
+      gradle(
+        task: "#{platform}:assemble",
+        build_type: other_builds_type,
+        properties: gradle_properties
+      )
 
-    gradle(
-      task: 'assemble',
-      build_type: prototype_build_type,
-      properties: {
-        'skipSentryProguardMappingUpload' => true
-      }
-    )
+      generated_apk_paths = lane_context[SharedValues::GRADLE_ALL_APK_OUTPUT_PATHS]
 
-    prototype_build_comments = lane_context[SharedValues::GRADLE_ALL_APK_OUTPUT_PATHS].map do |apk_path|
+      platform_apk = generated_apk_paths&.find { |p| p.include?("/#{platform}/") }
+
+      UI.user_error!("Could not find generated APK for '#{platform}' platform in the GRADLE_ALL_APK_OUTPUT_PATHS list.") if platform_apk.nil?
+
+      other_apks << platform_apk
+    end
+
+    s3_comments = []
+    other_apks.each do |apk_path|
       upload_path = upload_to_s3(
         bucket: 'a8c-apps-public-artifacts',
         key: "pocketcasts-#{get_app_key(apk_path: apk_path)}-prototype-build-#{generate_prototype_build_number}.apk",
@@ -653,52 +716,20 @@ platform :android do
 
       install_url = "#{PROTOTYPE_BUILD_DOMAIN}/#{upload_path}"
 
-      prototype_build_details_comment(
+      s3_comments << prototype_build_details_comment(
         app_display_name: get_app_display_name(apk_path: apk_path),
+        app_icon: ':amazon-s3:',
         download_url: install_url,
-        metadata: {
-          'Build Type': prototype_build_type
-        },
+        metadata: { 'Build Type': other_builds_type },
         fold: true
       )
     end
 
     comment_on_pr(
-      project: 'automattic/pocket-casts-android',
-      pr_number: Integer(ENV.fetch('BUILDKITE_PULL_REQUEST', nil)),
-      reuse_identifier: 'app-prototype-build-link',
-      body: prototype_build_comments.join
-    )
-  end
-
-  # Builds a prototype build and uploads it to Firebase App Distribution (FAD)
-  #
-  lane :build_and_upload_prototype_build_fad do
-    UI.user_error!("'FIREBASE_APP_DISTRIBUTION_ACCOUNT_KEY' must be defined as an environment variable.") unless ENV['FIREBASE_APP_DISTRIBUTION_ACCOUNT_KEY']
-
-    # 'Pull Request' and 'Branch' is always going to point to 'N/A' and 'main' respectively.
-    # No matter, it's better to have this setup ready for when and if we ever run this lane for PR builds as well.
-    release_notes = <<~NOTES
-      Pull Request: ##{pull_request_number || 'N/A'}
-      Branch: `#{ENV.fetch('BUILDKITE_BRANCH', 'N/A')}`
-      Commit: #{ENV.fetch('BUILDKITE_COMMIT', 'N/A')[0...7]}
-    NOTES
-
-    prototype_build_type = 'Prototype'
-
-    gradle(
-      task: 'app:assemble',
-      build_type: prototype_build_type,
-      properties: {
-        'skipSentryProguardMappingUpload' => true
-      }
-    )
-
-    firebase_app_distribution(
-      app: FIREBASE_APP_ID,
-      service_credentials_json_data: ENV.fetch('FIREBASE_APP_DISTRIBUTION_ACCOUNT_KEY', nil),
-      release_notes: release_notes,
-      groups: FIREBASE_TESTERS_GROUP
+      project: GITHUB_REPO,
+      pr_number: pr_number,
+      reuse_identifier: 'prototype-build-s3',
+      body: s3_comments.join
     )
   end
 
@@ -862,28 +893,16 @@ platform :android do
     VERSION_FORMATTER.beta_version(current_version)
   end
 
-  # Returns the beta version that is used by the code freeze
-  # It first increments the minor number, which also resets the build number to 0
-  # It then bumps the build number so the -rc-1 can be appended to the code freeze version
-  def beta_version_code_freeze
-    # Read the current release version from the version.properties file and parse it into an AppVersion object
-    current_version = VERSION_FORMATTER.parse(version_name_current)
-    # Calculate the next major version number
-    next_version = VERSION_CALCULATOR.next_release_version(version: current_version)
-    # Calculate the next build number
-    beta_version_code_freeze = VERSION_CALCULATOR.next_build_number(version: next_version)
-    # Return the formatted release version
-    VERSION_FORMATTER.beta_version(beta_version_code_freeze)
-  end
-
-  # Returns the beta version of the app in the format `1.2-rc-1`
+  # Returns the next beta version in the format `1.2-rc-2` (increments the build number)
   #
-  def beta_version_next
-    # Read the current release version from `version.properties` and parse it into an AppVersion object
-    current_version = VERSION_FORMATTER.parse(version_name_current)
-    # Calculate the next beta version
+  def beta_version_next(version_name: nil)
+    # Use provided version or read the current version from version.properties
+    version_name ||= version_name_current
+    # Parse the version string (e.g., "1.2-rc-1") into an AppVersion object
+    current_version = VERSION_FORMATTER.parse(version_name)
+    # Increment the build number to get the next beta version
     beta_version_next = VERSION_CALCULATOR.next_build_number(version: current_version)
-    # Return the formatted release version
+    # Format as beta version (e.g., "1.2-rc-2")
     VERSION_FORMATTER.beta_version(beta_version_next)
   end
 
@@ -937,5 +956,16 @@ platform :android do
     else
       is_beta ? PLAY_STORE_TRACK_BETA : PLAY_STORE_TRACK_PRODUCTION
     end
+  end
+
+  def ensure_branch_does_not_exist!(branch_name)
+    return unless Fastlane::Helper::GitHelper.branch_exists_on_remote?(branch_name: branch_name)
+
+    error_message = "The branch `#{branch_name}` already exists. Please check first if there is an existing Pull Request that needs to be merged or closed first, " \
+                    'or delete the branch to then run again the release task.'
+
+    buildkite_annotate(style: 'error', context: 'error-checking-branch', message: error_message) if is_ci
+
+    UI.user_error!(error_message)
   end
 end

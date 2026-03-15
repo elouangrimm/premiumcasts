@@ -1,11 +1,12 @@
 package au.com.shiftyjelly.pocketcasts.account.onboarding.recommendations
 
 import app.cash.turbine.test
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.testing.TestEventSink
 import au.com.shiftyjelly.pocketcasts.repositories.categories.CategoriesManager
 import au.com.shiftyjelly.pocketcasts.servers.model.DiscoverCategory
+import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingFlow
 import au.com.shiftyjelly.pocketcasts.sharedtest.MainCoroutineRule
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import com.automattic.eventhorizon.EventHorizon
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
@@ -18,24 +19,27 @@ import org.mockito.kotlin.whenever
 
 @RunWith(MockitoJUnitRunner::class)
 class OnboardingInterestsViewModelTest {
-
-    @OptIn(ExperimentalCoroutinesApi::class)
     @get:Rule
     val coroutineRule = MainCoroutineRule()
 
+    private val stateFlow = MutableStateFlow(emptyList<DiscoverCategory>())
+
     private val categoriesManager = mock<CategoriesManager>()
-    private val tracker = mock<AnalyticsTracker>()
-    val stateFlow = MutableStateFlow(emptyList<DiscoverCategory>())
+
+    private lateinit var viewModel: OnboardingInterestsViewModel
 
     @Before
     fun setup() {
         whenever(categoriesManager.availableInterestCategories).thenReturn(stateFlow)
+        viewModel = OnboardingInterestsViewModel(
+            categoriesManager = categoriesManager,
+            eventHorizon = EventHorizon(TestEventSink()),
+        )
     }
 
     @Test
     fun `should fetch categories on init`() = runTest {
         stateFlow.value = demoCategories
-        val viewModel = OnboardingInterestsViewModel(categoriesManager, tracker)
 
         viewModel.state.test {
             val item = awaitItem()
@@ -48,13 +52,12 @@ class OnboardingInterestsViewModelTest {
     @Test
     fun `should update categories on more selected`() = runTest {
         stateFlow.value = demoCategories
-        val viewModel = OnboardingInterestsViewModel(categoriesManager, tracker)
 
         viewModel.state.test {
             val item = awaitItem()
             assert(!item.isShowingAllCategories)
 
-            viewModel.showMore()
+            viewModel.showMore(flow = OnboardingFlow.InitialOnboarding)
 
             val nextItem = awaitItem()
             assert(nextItem.isShowingAllCategories)
@@ -64,13 +67,12 @@ class OnboardingInterestsViewModelTest {
     @Test
     fun `should update selected categories on selecting some`() = runTest {
         stateFlow.value = demoCategories
-        val viewModel = OnboardingInterestsViewModel(categoriesManager, tracker)
 
         viewModel.state.test {
             val item = awaitItem()
             assert(item.selectedCategories.isEmpty())
 
-            viewModel.updateSelectedCategory(demoCategories[0], true)
+            viewModel.updateSelectedCategory(category = demoCategories[0], isSelected = true, flow = OnboardingFlow.InitialOnboarding)
             val nextItem = awaitItem()
             assert(nextItem.selectedCategories.isNotEmpty())
         }

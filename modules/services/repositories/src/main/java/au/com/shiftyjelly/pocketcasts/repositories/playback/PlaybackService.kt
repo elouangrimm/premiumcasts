@@ -1,9 +1,7 @@
 package au.com.shiftyjelly.pocketcasts.repositories.playback
 
-import android.app.ActivityManager
 import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
-import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.Build
@@ -17,8 +15,6 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.widget.Toast
 import androidx.media.MediaBrowserServiceCompat
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.localization.BuildConfig
 import au.com.shiftyjelly.pocketcasts.localization.R
@@ -40,7 +36,6 @@ import au.com.shiftyjelly.pocketcasts.repositories.playback.auto.PackageValidato
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.Playlist
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistManager
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistPreview
-import au.com.shiftyjelly.pocketcasts.repositories.playlist.SmartPlaylistPreview
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.FolderManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
@@ -50,9 +45,9 @@ import au.com.shiftyjelly.pocketcasts.servers.podcast.PodcastCacheServiceManager
 import au.com.shiftyjelly.pocketcasts.utils.IS_RUNNING_UNDER_TEST
 import au.com.shiftyjelly.pocketcasts.utils.SchedulerProvider
 import au.com.shiftyjelly.pocketcasts.utils.Util
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.PlaybackForegroundServiceErrorEvent
 import com.jakewharton.rxrelay2.BehaviorRelay
 import dagger.hilt.android.AndroidEntryPoint
 import io.reactivex.Observable
@@ -145,7 +140,7 @@ open class PlaybackService :
 
     @Inject lateinit var podcastCacheServiceManager: PodcastCacheServiceManager
 
-    @Inject lateinit var analyticsTracker: AnalyticsTracker
+    @Inject lateinit var eventHorizon: EventHorizon
 
     @Inject lateinit var sleepTimer: SleepTimer
 
@@ -164,6 +159,8 @@ open class PlaybackService :
 
     private val disposables = CompositeDisposable()
 
+    @Volatile
+    private var isForeground: Boolean = false
     private var sleepTimerDisposable: Disposable? = null
     private var currentTimeLeft: Duration = ZERO
 
@@ -191,6 +188,7 @@ open class PlaybackService :
 
     override fun onDestroy() {
         super.onDestroy()
+        isForeground = false
 
         disposables.clear()
         sleepTimerDisposable?.dispose()
@@ -198,16 +196,8 @@ open class PlaybackService :
         LogBuffer.i(LogBuffer.TAG_PLAYBACK, "Playback service destroyed")
     }
 
-    @Suppress("DEPRECATION")
     fun isForegroundService(): Boolean {
-        val manager = baseContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
-            if (this::class.java.name == service.service.className) {
-                return service.foreground
-            }
-        }
-        Timber.e("isServiceRunningInForeground found no matching service")
-        return false
+        return isForeground
     }
 
     private inner class MediaControllerCallback(currentMetadataCompat: MediaMetadataCompat?) : MediaControllerCompat.Callback() {
@@ -288,19 +278,21 @@ open class PlaybackService :
                     if (notification != null) {
                         try {
                             startForeground(Settings.NotificationId.PLAYING.value, notification)
+                            isForeground = true
                             notificationManager.enteredForeground(notification)
                             LogBuffer.i(LogBuffer.TAG_PLAYBACK, "startForeground state: $state")
                         } catch (e: Exception) {
                             LogBuffer.e(LogBuffer.TAG_PLAYBACK, "attempted startForeground for state: $state, but that threw an exception we caught: $e")
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && e is ForegroundServiceStartNotAllowedException) {
                                 addBatteryWarnings()
-                                analyticsTracker.track(AnalyticsEvent.PLAYBACK_FOREGROUND_SERVICE_ERROR)
+                                eventHorizon.track(PlaybackForegroundServiceErrorEvent)
                             }
                         }
                     } else {
                         LogBuffer.i(LogBuffer.TAG_PLAYBACK, "can't startForeground as the notification is null")
                     }
                 }
+
                 PlaybackStateCompat.STATE_NONE,
                 PlaybackStateCompat.STATE_STOPPED,
                 PlaybackStateCompat.STATE_PAUSED,
@@ -325,6 +317,7 @@ open class PlaybackService :
 
                         // When paused keep the notification otherwise remove it
                         stopForeground(if (removeNotification) STOP_FOREGROUND_REMOVE else STOP_FOREGROUND_DETACH)
+                        isForeground = false
                         if (removeNotification) {
                             notificationManager.cancel(Settings.NotificationId.PLAYING.value)
                         }
@@ -430,10 +423,15 @@ open class PlaybackService :
         launch {
             val items: List<MediaBrowserCompat.MediaItem> = when (parentId) {
                 RECENT_ROOT -> loadRecentChildren()
+
                 SUGGESTED_ROOT -> loadSuggestedChildren()
+
                 MEDIA_ID_ROOT -> loadRootChildren()
+
                 PODCASTS_ROOT -> loadPodcastsChildren()
+
                 FILES_ROOT -> loadFilesChildren()
+
                 else -> {
                     if (parentId.startsWith(FOLDER_ROOT_PREFIX)) {
                         loadFolderPodcastsChildren(folderUuid = parentId.substring(FOLDER_ROOT_PREFIX.length))
@@ -684,7 +682,7 @@ open class PlaybackService :
             if (termCleaned.length <= 1) {
                 emptyList()
             } else {
-                serviceManager.searchForPodcastsSuspend(searchTerm = term, resources = resources).searchResults
+                serviceManager.searchForPodcasts(searchTerm = term).getOrThrow().searchResults
             }
         } catch (ex: Exception) {
             Timber.e(ex)
@@ -764,12 +762,7 @@ open class PlaybackService :
     }
 
     protected suspend fun getPlaylistPreviews(): List<PlaylistPreview> {
-        val playlists = playlistManager.playlistPreviewsFlow().first()
-        return if (FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true)) {
-            playlists
-        } else {
-            playlists.filterIsInstance<SmartPlaylistPreview>()
-        }
+        return playlistManager.playlistPreviewsFlow().first()
     }
 
     protected suspend fun getPlaylistEpisodes(

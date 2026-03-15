@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.ksp)
     alias(libs.plugins.compose.compiler)
@@ -27,6 +26,7 @@ dependencies {
 
     implementation(libs.androidx.webkit)
     implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
     implementation(libs.compose.activity)
     implementation(libs.compose.animation)
     implementation(libs.compose.animation.graphics)

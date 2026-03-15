@@ -5,16 +5,16 @@ import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
-import au.com.shiftyjelly.pocketcasts.models.to.PlaylistEpisode
 import au.com.shiftyjelly.pocketcasts.models.to.PodcastGrouping
+import au.com.shiftyjelly.pocketcasts.models.type.EpisodeDownloadStatus
 import au.com.shiftyjelly.pocketcasts.models.type.EpisodePlayingStatus
-import au.com.shiftyjelly.pocketcasts.models.type.EpisodeStatusEnum
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.model.AutoPlaySource
 import au.com.shiftyjelly.pocketcasts.repositories.file.CloudFilesManager
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
+import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -38,12 +38,16 @@ class AutoPlaySelector @Inject constructor(
                 if (podcast != null) {
                     findPodcastEpisodes(podcast, currentEpisodeUuid)
                 } else {
-                    findPlaylistEpisodes(source.uuid)
+                    findPlaylistEpisodes(source.uuid, currentEpisodeUuid)
                 }
             }
+
             AutoPlaySource.Predefined.Downloads -> findDownloadedEpisodes()
+
             AutoPlaySource.Predefined.Files -> findUserEpisodes()
+
             AutoPlaySource.Predefined.Starred -> findStarredEpisodes()
+
             AutoPlaySource.Predefined.None -> emptyList()
         }
         val episode = if (currentEpisodeUuid == null) {
@@ -51,6 +55,10 @@ class AutoPlaySelector @Inject constructor(
         } else {
             val currentEpisodeIndex = episodes.indexOfFirst { it.uuid == currentEpisodeUuid }
             episodes.getOrNull(currentEpisodeIndex + 1) ?: episodes.firstOrNull()?.takeIf { it.uuid != currentEpisodeUuid }
+        }
+
+        if (episode != null) {
+            LogBuffer.i(LogBuffer.TAG_PLAYBACK, "Auto play selected episode=${episode.uuid} from source=$source")
         }
 
         return episode?.let { it to source }
@@ -62,7 +70,10 @@ class AutoPlaySelector @Inject constructor(
     ): List<PodcastEpisode> {
         val episodes = episodeManager
             .findEpisodesByPodcastOrderedSuspend(podcast)
-            .filterNot(PodcastEpisode::isArchived)
+            .filter { episode ->
+                (!episode.isArchived && !episode.isFinished) ||
+                    episode.uuid == currentEpisodeUuid
+            }
 
         return withContext(Dispatchers.Default) {
             val modifiedEpisodes = when (podcast.grouping) {
@@ -70,7 +81,7 @@ class AutoPlaySelector @Inject constructor(
 
                 PodcastGrouping.Downloaded -> episodes.map { episode ->
                     if (episode.uuid == currentEpisodeUuid) {
-                        episode.copy(episodeStatus = EpisodeStatusEnum.DOWNLOADED)
+                        episode.copy(downloadStatus = EpisodeDownloadStatus.Downloaded)
                     } else {
                         episode
                     }
@@ -91,16 +102,16 @@ class AutoPlaySelector @Inject constructor(
         }
     }
 
-    private suspend fun findPlaylistEpisodes(playlistUuid: String): List<PodcastEpisode> {
-        val smartPlaylist = playlistManager.smartPlaylistFlow(playlistUuid).first()
-        val playlist = smartPlaylist ?: playlistManager.manualPlaylistFlow(playlistUuid).first()
-
-        return withContext(Dispatchers.Default) {
-            playlist?.episodes
-                ?.mapNotNull(PlaylistEpisode::toPodcastEpisode)
-                ?.filterNot(PodcastEpisode::isArchived)
-                .orEmpty()
-        }
+    private suspend fun findPlaylistEpisodes(
+        playlistUuid: String,
+        currentEpisodeUuid: String?,
+    ): List<PodcastEpisode> {
+        return playlistManager
+            .getAutoPlayEpisodes(playlistUuid, currentEpisodeUuid)
+            .filter { episode ->
+                (!episode.isArchived && !episode.isFinished) ||
+                    episode.uuid == currentEpisodeUuid
+            }
     }
 
     private suspend fun findDownloadedEpisodes(): List<PodcastEpisode> {

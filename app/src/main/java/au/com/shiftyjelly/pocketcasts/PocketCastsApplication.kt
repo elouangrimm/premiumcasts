@@ -7,16 +7,16 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.experiments.ExperimentProvider
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.crashlogging.InitializeRemoteLogging
 import au.com.shiftyjelly.pocketcasts.discover.worker.CuratedPodcastsSyncWorker
 import au.com.shiftyjelly.pocketcasts.engage.EngageSdkBridge
 import au.com.shiftyjelly.pocketcasts.models.db.dao.UpNextDao
-import au.com.shiftyjelly.pocketcasts.models.type.EpisodeStatusEnum
+import au.com.shiftyjelly.pocketcasts.models.type.EpisodeDownloadStatus
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
-import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewAnalyticsListener
+import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewExceptionHandler
 import au.com.shiftyjelly.pocketcasts.repositories.appreview.AppReviewManager
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadManager
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadStatusObserver
 import au.com.shiftyjelly.pocketcasts.repositories.endofyear.EndOfYearSync
 import au.com.shiftyjelly.pocketcasts.repositories.file.FileStorage
 import au.com.shiftyjelly.pocketcasts.repositories.file.StorageOptions
@@ -31,12 +31,12 @@ import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.shortcuts.DynamicShortcutsSynchronizer
 import au.com.shiftyjelly.pocketcasts.repositories.support.DatabaseExportHelper
-import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.repositories.user.StatsManager
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
 import au.com.shiftyjelly.pocketcasts.shared.AppLifecycleObserver
 import au.com.shiftyjelly.pocketcasts.shared.DownloadStatisticsReporter
 import au.com.shiftyjelly.pocketcasts.ui.helper.AppIcon
+import au.com.shiftyjelly.pocketcasts.utils.ChainedExceptionHandler
 import au.com.shiftyjelly.pocketcasts.utils.TimberDebugTree
 import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
 import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
@@ -44,8 +44,8 @@ import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBufferUncaughtExceptionHandler
 import au.com.shiftyjelly.pocketcasts.utils.log.RxJavaUncaughtExceptionHandling
 import au.com.shiftyjelly.pocketcasts.widget.PlayerWidgetManager
-import coil.Coil
-import coil.ImageLoader
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.squareup.moshi.Moshi
@@ -90,7 +90,7 @@ class PocketCastsApplication :
 
     @Inject lateinit var playbackManager: PlaybackManager
 
-    @Inject lateinit var downloadManager: DownloadManager
+    @Inject lateinit var downloadStatusObserver: DownloadStatusObserver
 
     @Inject lateinit var notificationHelper: NotificationHelper
 
@@ -105,8 +105,6 @@ class PocketCastsApplication :
     @Inject lateinit var userManager: UserManager
 
     @Inject lateinit var analyticsTracker: AnalyticsTracker
-
-    @Inject lateinit var syncManager: SyncManager
 
     @Inject lateinit var downloadStatisticsReporter: DownloadStatisticsReporter
 
@@ -137,7 +135,7 @@ class PocketCastsApplication :
 
     @Inject lateinit var appReviewManager: AppReviewManager
 
-    @Inject lateinit var appReviewAnalyticsListener: AppReviewAnalyticsListener
+    @Inject lateinit var appReviewExceptionHandler: AppReviewExceptionHandler
 
     override fun onCreate() {
         if (BuildConfig.DEBUG) {
@@ -181,15 +179,19 @@ class PocketCastsApplication :
     private fun setupAnalytics() {
         analyticsTracker.clearAllData()
         analyticsTracker.refreshMetadata()
-        analyticsTracker.addListener(appReviewAnalyticsListener)
         downloadStatisticsReporter.setup()
         experimentProvider.initialize()
     }
 
     private fun setupCrashLogging() {
-        Thread.getDefaultUncaughtExceptionHandler()?.let {
-            Thread.setDefaultUncaughtExceptionHandler(LogBufferUncaughtExceptionHandler(it))
-        }
+        val exceptionHandler = ChainedExceptionHandler(
+            listOfNotNull(
+                LogBufferUncaughtExceptionHandler(),
+                appReviewExceptionHandler,
+                Thread.getDefaultUncaughtExceptionHandler(),
+            ),
+        )
+        Thread.setDefaultUncaughtExceptionHandler(exceptionHandler)
 
         initializeRemoteLogging()
 
@@ -218,11 +220,10 @@ class PocketCastsApplication :
             notificationManager.setupOffersNotifications()
             appLifecycleObserver.setup()
 
-            Coil.setImageLoader(coilImageLoader)
+            SingletonImageLoader.setSafe { coilImageLoader }
 
             withContext(Dispatchers.Default) {
                 playbackManager.setup()
-                downloadManager.setup(episodeManager, podcastManager, playbackManager)
 
                 val isRestoreFromBackup = settings.isRestoreFromBackup()
                 // as this may be a different device clear the storage location on a restore
@@ -257,7 +258,7 @@ class PocketCastsApplication :
                     val restoredFromBackup = podcasts.isNotEmpty()
                     if (restoredFromBackup) {
                         // check to see if the episode files already exist
-                        episodeManager.updateAllEpisodeStatusBlocking(EpisodeStatusEnum.NOT_DOWNLOADED)
+                        episodeManager.updateAllEpisodeStatusBlocking(EpisodeDownloadStatus.DownloadNotRequested)
                         fileStorage.fixBrokenFiles(episodeManager)
                         // reset stats
                         statsManager.reset()
@@ -291,7 +292,7 @@ class PocketCastsApplication :
         applicationScope.launch(Dispatchers.IO) { fileStorage.fixBrokenFiles(episodeManager) }
 
         userEpisodeManager.monitorUploads(applicationContext)
-        downloadManager.beginMonitoringWorkManager(applicationContext)
+        downloadStatusObserver.monitorDownloadStatus()
         userManager.beginMonitoringAccountManager(playbackManager)
         CuratedPodcastsSyncWorker.enqueuePeriodicWork(this)
         engageSdkBridge.registerIntegration()

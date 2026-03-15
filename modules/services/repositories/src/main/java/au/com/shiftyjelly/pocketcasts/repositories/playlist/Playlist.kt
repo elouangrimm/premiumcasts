@@ -3,7 +3,9 @@ package au.com.shiftyjelly.pocketcasts.repositories.playlist
 import au.com.shiftyjelly.pocketcasts.models.to.PlaylistEpisode
 import au.com.shiftyjelly.pocketcasts.models.type.PlaylistEpisodeSortType
 import au.com.shiftyjelly.pocketcasts.models.type.SmartRules
+import com.automattic.eventhorizon.PlaylistType
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 sealed interface Playlist {
     val uuid: String
@@ -35,18 +37,32 @@ sealed interface Playlist {
         val displayedEpisodeCount: Int,
         val displayedAvailableEpisodeCount: Int,
         val archivedEpisodeCount: Int,
-    )
+    ) {
+        companion object {
+            val ForPreview = Metadata(
+                playbackDurationLeft = 0.seconds,
+                artworkUuids = emptyList(),
+                isShowingArchived = true,
+                totalEpisodeCount = 0,
+                displayedEpisodeCount = 0,
+                displayedAvailableEpisodeCount = 0,
+                archivedEpisodeCount = 0,
+            )
+        }
+    }
 
     enum class Type(
-        val analyticsValue: String,
+        val eventHorizonValue: PlaylistType,
     ) {
         Manual(
-            analyticsValue = "manual",
+            eventHorizonValue = PlaylistType.Manual,
         ),
         Smart(
-            analyticsValue = "smart",
+            eventHorizonValue = PlaylistType.Smart,
         ),
         ;
+
+        val analyticsValue get() = eventHorizonValue.toString()
 
         companion object {
             fun fromValue(value: String) = entries.firstOrNull { it.analyticsValue == value }

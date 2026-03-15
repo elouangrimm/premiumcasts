@@ -35,8 +35,10 @@ import com.pocketcasts.service.api.PodcastsEpisodesRequest
 import com.pocketcasts.service.api.ReferralCodeResponse
 import com.pocketcasts.service.api.ReferralRedemptionResponse
 import com.pocketcasts.service.api.ReferralValidationResponse
+import com.pocketcasts.service.api.StarredEpisodesResponse
 import com.pocketcasts.service.api.SyncUpdateRequest
 import com.pocketcasts.service.api.SyncUpdateResponse
+import com.pocketcasts.service.api.UpNextResponse
 import com.pocketcasts.service.api.UserPlaylistListResponse
 import com.pocketcasts.service.api.UserPodcastListResponse
 import com.pocketcasts.service.api.WinbackResponse
@@ -47,6 +49,7 @@ import io.reactivex.Single
 import java.io.File
 import kotlinx.coroutines.flow.Flow
 import retrofit2.Response
+import com.pocketcasts.service.api.UpNextSyncRequest as UpNextSyncRequestProtobuf
 
 interface SyncManager : NamedSettingsCaller {
 
@@ -58,11 +61,11 @@ interface SyncManager : NamedSettingsCaller {
     fun getEmail(): String?
     fun emailFlow(): Flow<String?>
     fun emailFlowable(): Flowable<Optional<String>>
-    fun signOut(action: () -> Unit = {})
+    suspend fun signOut(action: suspend () -> Unit = {})
     suspend fun loginWithGoogle(idToken: String, signInSource: SignInSource): LoginResult
     suspend fun loginWithEmailAndPassword(email: String, password: String, signInSource: SignInSource): LoginResult
     suspend fun loginWithToken(token: RefreshToken, loginIdentity: LoginIdentity, signInSource: SignInSource): LoginResult
-    suspend fun createUserWithEmailAndPassword(email: String, password: String): LoginResult
+    suspend fun createUserWithEmailAndPassword(email: String, password: String, signInSource: SignInSource.UserInitiated): LoginResult
     suspend fun forgotPassword(email: String, onSuccess: () -> Unit, onError: (String) -> Unit)
     suspend fun getAccessToken(account: Account): AccessToken
     fun getRefreshToken(): RefreshToken?
@@ -101,6 +104,7 @@ interface SyncManager : NamedSettingsCaller {
     suspend fun getBookmarksOrThrow(): BookmarksResponse
     suspend fun getEpisodesOrThrow(request: PodcastsEpisodesRequest): EpisodesResponse
     fun getPodcastEpisodesRxSingle(podcastUuid: String): Single<PodcastEpisodesResponse>
+    suspend fun getStarredEpisodesOrThrow(): StarredEpisodesResponse
 
     suspend fun syncUpdateOrThrow(request: SyncUpdateRequest): SyncUpdateResponse
 
@@ -116,6 +120,7 @@ interface SyncManager : NamedSettingsCaller {
     suspend fun getFilters(): List<PlaylistEntity>
     suspend fun loadStats(): StatsBundle
     suspend fun upNextSync(request: UpNextSyncRequest): UpNextSyncResponse
+    suspend fun upNextSyncProtobuf(request: UpNextSyncRequestProtobuf): UpNextResponse
     suspend fun getBookmarks(): List<Bookmark>
     suspend fun sendAnonymousFeedback(subject: String, inbox: String, message: String): Response<Void>
     suspend fun sendFeedback(subject: String, inbox: String, message: String): Response<Void>

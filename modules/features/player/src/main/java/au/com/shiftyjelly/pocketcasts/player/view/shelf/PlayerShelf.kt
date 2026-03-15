@@ -73,7 +73,7 @@ fun PlayerShelf(
                 isStarred = it.podcastHeader.isStarred,
                 downloadData = PlayerShelfData.DownloadData(
                     isDownloading = it.podcastHeader.episode?.isDownloading == true,
-                    isQueued = it.podcastHeader.episode?.isQueued == true,
+                    isQueued = it.podcastHeader.episode?.isDownloadPending == true,
                     isDownloaded = it.podcastHeader.episode?.isDownloaded == true,
                 ),
             )
@@ -141,8 +141,12 @@ fun PlayerShelf(
             shelfSharedViewModel.onMoreClick()
         },
         onAddToPlaylistClick = {
-            val episodeUuid = playerViewModel.episode?.uuid ?: return@PlayerShelfContent
-            shelfSharedViewModel.onAddToPlaylistClick(episodeUuid, ShelfItemSource.Shelf)
+            val episode = playerViewModel.episode ?: return@PlayerShelfContent
+            shelfSharedViewModel.onAddToPlaylistClick(
+                episodeUuid = episode.uuid,
+                podcastUuid = episode.podcastOrSubstituteUuid,
+                source = ShelfItemSource.Shelf,
+            )
         },
         modifier = modifier,
     )

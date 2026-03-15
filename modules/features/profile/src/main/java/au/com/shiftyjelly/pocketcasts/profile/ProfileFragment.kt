@@ -112,9 +112,12 @@ class ProfileFragment :
             onDismissCreateFreeAccountBannerClick = {
                 profileViewModel.dismissFreeAccountBanner()
             },
+            onEndOfYearCardShow = {
+                profileViewModel.onEndOfYearCardShown()
+            },
             onPlaybackClick = {
                 profileViewModel.onPlaybackClick()
-                (activity as? FragmentHostListener)?.showStoriesOrAccount(StoriesSource.PROFILE.value)
+                (activity as? FragmentHostListener)?.showStoriesOrAccount(StoriesSource.PROFILE.key)
             },
             onClaimReferralsClick = {
                 fragmentHostListener.showBottomSheet(ReferralsGuestPassFragment.newInstance(ReferralsPageType.Claim))

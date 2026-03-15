@@ -6,17 +6,26 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.toLiveData
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.models.type.SignInState
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.notification.NotificationManager
 import au.com.shiftyjelly.pocketcasts.repositories.notification.OnboardingNotificationType
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
-import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingUpgradeSource
 import au.com.shiftyjelly.pocketcasts.ui.helper.AppIcon
 import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.SettingsAppearanceAppIconChangedEvent
+import com.automattic.eventhorizon.SettingsAppearanceFollowSystemThemeToggledEvent
+import com.automattic.eventhorizon.SettingsAppearanceRefreshAllArtworkTappedEvent
+import com.automattic.eventhorizon.SettingsAppearanceShowArtworkOnLockScreenToggledEvent
+import com.automattic.eventhorizon.SettingsAppearanceShownEvent
+import com.automattic.eventhorizon.SettingsAppearanceThemeChangedEvent
+import com.automattic.eventhorizon.SettingsAppearanceUseDarkUpNextToggledEvent
+import com.automattic.eventhorizon.SettingsAppearanceUseDynamicColorsWidgetToggledEvent
+import com.automattic.eventhorizon.SettingsAppearanceUseEpisodeArtworkToggledEvent
+import com.automattic.eventhorizon.UpgradeBannerDismissedEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -28,7 +37,7 @@ class SettingsAppearanceViewModel @Inject constructor(
     val userEpisodeManager: UserEpisodeManager,
     val theme: Theme,
     private val appIcon: AppIcon,
-    private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     private val notificationManager: NotificationManager,
 ) : ViewModel() {
 
@@ -41,29 +50,17 @@ class SettingsAppearanceViewModel @Inject constructor(
     var changeAppIconType: Pair<AppIcon.AppIconType?, AppIcon.AppIconType?> = Pair(null, null)
 
     fun onShown() {
-        analyticsTracker.track(AnalyticsEvent.SETTINGS_APPEARANCE_SHOWN)
+        eventHorizon.track(SettingsAppearanceShownEvent)
     }
 
     fun onRefreshArtwork() {
-        analyticsTracker.track(AnalyticsEvent.SETTINGS_APPEARANCE_REFRESH_ALL_ARTWORK_TAPPED)
+        eventHorizon.track(SettingsAppearanceRefreshAllArtworkTappedEvent)
     }
 
     fun onThemeChanged(theme: Theme.ThemeType) {
-        analyticsTracker.track(
-            AnalyticsEvent.SETTINGS_APPEARANCE_THEME_CHANGED,
-            mapOf(
-                "value" to when (theme) {
-                    Theme.ThemeType.LIGHT -> "default_light"
-                    Theme.ThemeType.DARK -> "default_dark"
-                    Theme.ThemeType.ROSE -> "rose"
-                    Theme.ThemeType.INDIGO -> "indigo"
-                    Theme.ThemeType.EXTRA_DARK -> "extra_dark"
-                    Theme.ThemeType.DARK_CONTRAST -> "dark_contrast"
-                    Theme.ThemeType.LIGHT_CONTRAST -> "light_contrast"
-                    Theme.ThemeType.ELECTRIC -> "electric"
-                    Theme.ThemeType.CLASSIC_LIGHT -> "classic"
-                    Theme.ThemeType.RADIOACTIVE -> "radioactive"
-                },
+        eventHorizon.track(
+            SettingsAppearanceThemeChangedEvent(
+                value = theme.eventHorizonValue,
             ),
         )
         viewModelScope.launch {
@@ -73,14 +70,13 @@ class SettingsAppearanceViewModel @Inject constructor(
 
     fun loadThemesAndIcons() {
         createAccountState.postValue(SettingsAppearanceState.ThemesAndIconsLoading)
-        val appIcons = appIcon.allAppIconTypes.toList()
 
         createAccountState.postValue(
             SettingsAppearanceState.ThemesAndIconsLoaded(
                 theme.activeTheme,
                 theme.allThemes.toList(),
                 appIcon.activeAppIcon,
-                appIcons,
+                appIcon.allAppIconTypes,
             ),
         )
     }
@@ -88,64 +84,47 @@ class SettingsAppearanceViewModel @Inject constructor(
     fun updateGlobalIcon(appIconType: AppIcon.AppIconType) {
         appIcon.activeAppIcon = appIconType
         appIcon.enableSelectedAlias(appIconType)
-        analyticsTracker.track(
-            AnalyticsEvent.SETTINGS_APPEARANCE_APP_ICON_CHANGED,
-            mapOf(
-                "value" to when (appIconType) {
-                    AppIcon.AppIconType.DEFAULT -> "default"
-                    AppIcon.AppIconType.DARK -> "dark"
-                    AppIcon.AppIconType.ROUND_LIGHT -> "round_light"
-                    AppIcon.AppIconType.ROUND_DARK -> "round_dark"
-                    AppIcon.AppIconType.INDIGO -> "indigo"
-                    AppIcon.AppIconType.ROSE -> "rose"
-                    AppIcon.AppIconType.CAT -> "pocket_cats"
-                    AppIcon.AppIconType.REDVELVET -> "red_velvet"
-                    AppIcon.AppIconType.PLUS -> "plus"
-                    AppIcon.AppIconType.CLASSIC -> "classic"
-                    AppIcon.AppIconType.ELECTRIC_BLUE -> "electric_blue"
-                    AppIcon.AppIconType.ELECTRIC_PINK -> "electric_pink"
-                    AppIcon.AppIconType.RADIOACTIVE -> "radioactive"
-                    AppIcon.AppIconType.HALLOWEEN -> "halloween"
-                    AppIcon.AppIconType.PATRON_CHROME -> "patron_chrome"
-                    AppIcon.AppIconType.PATRON_ROUND -> "patron_round"
-                    AppIcon.AppIconType.PATRON_GLOW -> "patron_glow"
-                    AppIcon.AppIconType.PATRON_DARK -> "patron_dark"
-                    AppIcon.AppIconType.PRIDE -> "pride_2023"
-                },
+        eventHorizon.track(
+            SettingsAppearanceAppIconChangedEvent(
+                value = appIconType.eventHorizonValue,
             ),
         )
     }
 
     fun updateUpNextDarkTheme(value: Boolean) {
         settings.useDarkUpNextTheme.set(value, updateModifiedAt = true)
-        analyticsTracker.track(
-            AnalyticsEvent.SETTINGS_APPEARANCE_USE_DARK_UP_NEXT_TOGGLED,
-            mapOf("enabled" to value),
+        eventHorizon.track(
+            SettingsAppearanceUseDarkUpNextToggledEvent(
+                enabled = value,
+            ),
         )
     }
 
     fun updateWidgetForDynamicColors(value: Boolean) {
         settings.useDynamicColorsForWidget.set(value, updateModifiedAt = true)
-        analyticsTracker.track(
-            AnalyticsEvent.SETTINGS_APPEARANCE_USE_DYNAMIC_COLORS_WIDGET_TOGGLED,
-            mapOf("enabled" to value),
+        eventHorizon.track(
+            SettingsAppearanceUseDynamicColorsWidgetToggledEvent(
+                enabled = value,
+            ),
         )
     }
 
     fun updateShowArtworkOnLockScreen(value: Boolean) {
         settings.showArtworkOnLockScreen.set(value, updateModifiedAt = true)
-        analyticsTracker.track(
-            AnalyticsEvent.SETTINGS_APPEARANCE_SHOW_ARTWORK_ON_LOCK_SCREEN_TOGGLED,
-            mapOf("enabled" to value),
+        eventHorizon.track(
+            SettingsAppearanceShowArtworkOnLockScreenToggledEvent(
+                enabled = value,
+            ),
         )
     }
 
     fun updateUseEpisodeArtwork(value: Boolean) {
         val currentConfiguration = settings.artworkConfiguration.value
         settings.artworkConfiguration.set(currentConfiguration.copy(useEpisodeArtwork = value), updateModifiedAt = true)
-        analyticsTracker.track(
-            AnalyticsEvent.SETTINGS_APPEARANCE_USE_EPISODE_ARTWORK_TOGGLED,
-            mapOf("enabled" to value),
+        eventHorizon.track(
+            SettingsAppearanceUseEpisodeArtworkToggledEvent(
+                enabled = value,
+            ),
         )
     }
 
@@ -159,14 +138,19 @@ class SettingsAppearanceViewModel @Inject constructor(
 
     fun useAndroidLightDarkMode(use: Boolean, activity: AppCompatActivity?) {
         theme.setUseSystemTheme(use, activity)
-        analyticsTracker.track(
-            AnalyticsEvent.SETTINGS_APPEARANCE_FOLLOW_SYSTEM_THEME_TOGGLED,
-            mapOf("enabled" to use),
+        eventHorizon.track(
+            SettingsAppearanceFollowSystemThemeToggledEvent(
+                enabled = use,
+            ),
         )
     }
 
-    fun onUpgradeBannerDismissed(source: OnboardingUpgradeSource) {
-        analyticsTracker.track(AnalyticsEvent.UPGRADE_BANNER_DISMISSED, mapOf("source" to source.analyticsValue))
+    fun onUpgradeBannerDismissed(sourceView: SourceView) {
+        eventHorizon.track(
+            UpgradeBannerDismissedEvent(
+                source = sourceView.eventHorizonValue,
+            ),
+        )
     }
 }
 

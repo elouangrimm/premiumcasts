@@ -6,8 +6,6 @@ import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.asFlow
 import androidx.lifecycle.liveData
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.localization.extensions.getStringPlural
 import au.com.shiftyjelly.pocketcasts.models.entity.Bookmark
@@ -16,6 +14,10 @@ import au.com.shiftyjelly.pocketcasts.repositories.bookmark.BookmarkManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.views.R
 import au.com.shiftyjelly.pocketcasts.views.dialog.ConfirmationDialog
+import com.automattic.eventhorizon.BookmarkDeleteFormShownEvent
+import com.automattic.eventhorizon.BookmarkDeleteFormSubmittedEvent
+import com.automattic.eventhorizon.BookmarkDeletedEvent
+import com.automattic.eventhorizon.EventHorizon
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -28,7 +30,7 @@ import au.com.shiftyjelly.pocketcasts.ui.R as UR
 
 class MultiSelectBookmarksHelper @Inject constructor(
     private val bookmarkManager: BookmarkManager,
-    private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     var episodeManager: EpisodeManager,
 ) : MultiSelectHelper<Bookmark>() {
     override val maxToolbarIcons = 3
@@ -55,7 +57,7 @@ class MultiSelectBookmarksHelper @Inject constructor(
         }
     }
 
-    override fun isSelected(multiSelectable: Bookmark) = selectedList.count { it.uuid == multiSelectable.uuid } > 0
+    override fun isSelected(multiSelectable: Bookmark) = selectedSet.any { it.uuid == multiSelectable.uuid }
 
     override fun onMenuItemSelected(
         itemId: Int,
@@ -89,13 +91,12 @@ class MultiSelectBookmarksHelper @Inject constructor(
 
     override fun deselect(multiSelectable: Bookmark) {
         if (isSelected(multiSelectable)) {
-            val selectedItem = selectedList.firstOrNull { it.uuid == multiSelectable.uuid }
-            selectedItem?.let { selectedList.remove(it) }
+            selectedSet.removeIf { it.uuid == multiSelectable.uuid }
         }
 
-        _selectedListLive.value = selectedList
+        _selectedListLive.value = selectedSet.toList()
 
-        if (selectedList.isEmpty()) {
+        if (selectedSet.isEmpty()) {
             closeMultiSelect()
         }
     }
@@ -109,15 +110,15 @@ class MultiSelectBookmarksHelper @Inject constructor(
     }
 
     fun delete(resources: Resources, fragmentManager: FragmentManager) {
-        val bookmarks = selectedList.toList()
+        val bookmarks = selectedSet.toList()
         if (bookmarks.isEmpty()) {
             closeMultiSelect()
             return
         }
-
-        analyticsTracker.track(
-            AnalyticsEvent.BOOKMARK_DELETE_FORM_SHOWN,
-            mapOf("source" to source.analyticsValue),
+        eventHorizon.track(
+            BookmarkDeleteFormShownEvent(
+                source = source.eventHorizonValue,
+            ),
         )
 
         val count = bookmarks.size
@@ -144,16 +145,18 @@ class MultiSelectBookmarksHelper @Inject constructor(
             .setIconTint(UR.attr.support_05)
             .setOnConfirm {
                 launch {
-                    analyticsTracker.track(
-                        AnalyticsEvent.BOOKMARK_DELETE_FORM_SUBMITTED,
-                        mapOf("source" to source.analyticsValue),
+                    eventHorizon.track(
+                        BookmarkDeleteFormSubmittedEvent(
+                            source = source.eventHorizonValue,
+                        ),
                     )
 
                     bookmarks.forEach {
                         bookmarkManager.deleteToSync(it.uuid)
-                        analyticsTracker.track(
-                            AnalyticsEvent.BOOKMARK_DELETED,
-                            mapOf("source" to source.analyticsValue),
+                        eventHorizon.track(
+                            BookmarkDeletedEvent(
+                                source = source.eventHorizonValue,
+                            ),
                         )
                     }
 
@@ -172,7 +175,7 @@ class MultiSelectBookmarksHelper @Inject constructor(
     }
 
     private suspend fun isEligibleToShare(): Boolean {
-        val bookmark = selectedList.first()
+        val bookmark = selectedSet.first()
 
         val episode = episodeManager.findEpisodeByUuid(bookmark.episodeUuid)
         return episode is PodcastEpisode

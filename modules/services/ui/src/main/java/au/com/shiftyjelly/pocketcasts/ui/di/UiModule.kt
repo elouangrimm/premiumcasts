@@ -2,8 +2,12 @@ package au.com.shiftyjelly.pocketcasts.ui.di
 
 import android.content.Context
 import au.com.shiftyjelly.pocketcasts.servers.di.Artwork
-import coil.ImageLoader
-import coil.disk.DiskCache
+import coil3.ImageLoader
+import coil3.disk.DiskCache
+import coil3.disk.directory
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.request.crossfade
+import dagger.Lazy
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -20,11 +24,17 @@ class UiModule {
     @Singleton
     internal fun provideCoilImageLoader(
         @ApplicationContext context: Context,
-        @Artwork client: OkHttpClient,
+        @Artwork httpClient: Lazy<OkHttpClient>,
     ): ImageLoader {
         return ImageLoader.Builder(context)
             .crossfade(true)
-            .okHttpClient(client)
+            .components {
+                add(
+                    OkHttpNetworkFetcherFactory(
+                        callFactory = { httpClient.get() },
+                    ),
+                )
+            }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("ImageCache"))

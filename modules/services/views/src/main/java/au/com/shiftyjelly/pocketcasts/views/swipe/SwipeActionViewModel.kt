@@ -4,13 +4,12 @@ import android.content.Context
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
-import au.com.shiftyjelly.pocketcasts.analytics.EpisodeAnalytics
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.analytics.Tracker
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
+import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadQueue
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
@@ -19,6 +18,11 @@ import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.views.dialog.ShareDialogFactory
 import au.com.shiftyjelly.pocketcasts.views.helper.CloudDeleteHelper
 import au.com.shiftyjelly.pocketcasts.views.helper.DeleteState
+import com.automattic.eventhorizon.EpisodeDeletedFromCloudEvent
+import com.automattic.eventhorizon.EpisodeRemovedFromListEvent
+import com.automattic.eventhorizon.EpisodeSwipeActionPerformedEvent
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.PlaylistRemoveEpisodeSource
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -37,9 +41,9 @@ class SwipeActionViewModel @AssistedInject constructor(
     private val playlistManager: PlaylistManager,
     private val userEpisodeManager: UserEpisodeManager,
     private val shareDialogFactory: ShareDialogFactory,
+    private val downloadQueue: DownloadQueue,
     private val addToPlaylistFragmentFactory: AddToPlaylistFragmentFactory,
-    private val tracker: AnalyticsTracker,
-    private val episodeAnalytics: EpisodeAnalytics,
+    private val eventHorizon: EventHorizon,
     @ApplicationContext private val context: Context,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @Assisted private val swipeSource: SwipeSource,
@@ -84,6 +88,7 @@ class SwipeActionViewModel @AssistedInject constructor(
         viewModelScope.launch {
             val episode = episodeManager.findEpisodeByUuid(episodeUuid) as? PodcastEpisode ?: return@launch
             withContext(Dispatchers.IO) {
+                episodeManager.disableAutoDownload(episode)
                 episodeManager.archiveBlocking(episode, playbackManager)
             }
         }
@@ -100,7 +105,7 @@ class SwipeActionViewModel @AssistedInject constructor(
         }
     }
 
-    fun removeFromPlaylist(episodeUuid: String) {
+    fun removeFromPlaylist(episodeUuid: String, podcastUuid: String) {
         trackAction(SwipeAction.RemoveFromPlaylist)
 
         val playlistUuid = playlistUuid ?: return
@@ -108,6 +113,16 @@ class SwipeActionViewModel @AssistedInject constructor(
             playlistManager.deleteManualEpisode(
                 episodeUuid = episodeUuid,
                 playlistUuid = playlistUuid,
+            )
+            val playlistName = playlistManager.findPlaylistPreview(playlistUuid)?.title
+            eventHorizon.track(
+                EpisodeRemovedFromListEvent(
+                    playlistName = playlistName ?: Tracker.INVALID_OR_NULL_VALUE,
+                    playlistUuid = playlistUuid,
+                    episodeUuid = episodeUuid,
+                    podcastUuid = podcastUuid,
+                    source = PlaylistRemoveEpisodeSource.SwipeRemove,
+                ),
             )
         }
     }
@@ -123,7 +138,7 @@ class SwipeActionViewModel @AssistedInject constructor(
         val podcast = podcastManager.findPodcastByUuid(episode.podcastUuid) ?: return
 
         shareDialogFactory
-            .shareEpisode(podcast, episode, SourceView.EPISODE_SWIPE_ACTION)
+            .shareEpisode(podcast, episode, swipeSource.toSourceView())
             .show(fragmentManager, "share_dialog")
     }
 
@@ -143,43 +158,46 @@ class SwipeActionViewModel @AssistedInject constructor(
                 CloudDeleteHelper.deleteEpisode(
                     episode = userEpisode,
                     deleteState = deleteState,
+                    sourceView = swipeSource.toSourceView(),
+                    downloadQueue = downloadQueue,
                     playbackManager = playbackManager,
-                    episodeManager = episodeManager,
                     userEpisodeManager = userEpisodeManager,
                     applicationScope = applicationScope,
                 )
-                episodeAnalytics.trackEvent(
-                    event = if (deleteState == DeleteState.Cloud && !episode.isDownloaded) {
-                        AnalyticsEvent.EPISODE_DELETED_FROM_CLOUD
-                    } else {
-                        AnalyticsEvent.EPISODE_DOWNLOAD_DELETED
-                    },
-                    source = SourceView.FILES,
-                    uuid = episode.uuid,
-                )
+                if (deleteState == DeleteState.Cloud && !episode.isDownloaded) {
+                    eventHorizon.track(
+                        EpisodeDeletedFromCloudEvent(
+                            episodeUuid = episode.uuid,
+                            source = swipeSource.toSourceView().eventHorizonValue,
+                        ),
+                    )
+                }
+                viewModelScope.launch {
+                    episodeManager.disableAutoDownload(episode)
+                }
             },
             resources = context.resources,
         ).show(fragmentManager, "delete_confirm")
     }
 
-    fun addToPlaylist(episodeUuid: String, fragmentManager: FragmentManager) {
+    fun addToPlaylist(episodeUuid: String, podcastUuid: String, fragmentManager: FragmentManager) {
         trackAction(SwipeAction.AddToPlaylist)
 
         if (fragmentManager.findFragmentByTag("add-to-playlist") == null) {
             val fragment = addToPlaylistFragmentFactory.create(
                 source = AddToPlaylistFragmentFactory.Source.Swipe,
                 episodeUuid = episodeUuid,
+                podcastUuid = podcastUuid,
             )
             fragment.show(fragmentManager, "add-to-playlist")
         }
     }
 
     private fun trackAction(action: SwipeAction) {
-        tracker.track(
-            AnalyticsEvent.EPISODE_SWIPE_ACTION_PERFORMED,
-            mapOf(
-                "action" to action.analyticsValue,
-                "source" to swipeSource.analyticsValue,
+        eventHorizon.track(
+            EpisodeSwipeActionPerformedEvent(
+                source = swipeSource.eventHorizonValue,
+                action = action.eventHorizonValue,
             ),
         )
     }
@@ -196,17 +214,41 @@ class SwipeActionViewModel @AssistedInject constructor(
 suspend fun SwipeActionViewModel.handleAction(
     action: SwipeAction,
     episodeUuid: String,
+    podcastUuid: String,
     fragmentManager: FragmentManager,
 ) = when (action) {
-    SwipeAction.AddToUpNextTop -> addToUpNextTop(episodeUuid)
-    SwipeAction.AddToUpNextBottom -> addToUpNextBottom(episodeUuid)
-    SwipeAction.RemoveFromUpNext -> removeFromUpNext(episodeUuid)
-    SwipeAction.Share -> shareEpisode(episodeUuid, fragmentManager)
-    SwipeAction.Archive -> archive(episodeUuid)
-    SwipeAction.Unarchive -> unarchive(episodeUuid)
-    SwipeAction.RemoveFromPlaylist -> removeFromPlaylist(episodeUuid)
-    SwipeAction.DeleteUserEpisode -> deleteUserEpisode(episodeUuid, fragmentManager)
-    SwipeAction.AddToPlaylist -> addToPlaylist(episodeUuid, fragmentManager)
+    SwipeAction.AddToUpNextTop -> addToUpNextTop(
+        episodeUuid = episodeUuid,
+    )
+
+    SwipeAction.AddToUpNextBottom -> addToUpNextBottom(episodeUuid = episodeUuid)
+
+    SwipeAction.RemoveFromUpNext -> removeFromUpNext(episodeUuid = episodeUuid)
+
+    SwipeAction.Share -> shareEpisode(
+        episodeUuid = episodeUuid,
+        fragmentManager = fragmentManager,
+    )
+
+    SwipeAction.Archive -> archive(episodeUuid = episodeUuid)
+
+    SwipeAction.Unarchive -> unarchive(episodeUuid = episodeUuid)
+
+    SwipeAction.RemoveFromPlaylist -> removeFromPlaylist(
+        episodeUuid = episodeUuid,
+        podcastUuid = podcastUuid,
+    )
+
+    SwipeAction.DeleteUserEpisode -> deleteUserEpisode(
+        episodeUuid = episodeUuid,
+        fragmentManager = fragmentManager,
+    )
+
+    SwipeAction.AddToPlaylist -> addToPlaylist(
+        episodeUuid = episodeUuid,
+        podcastUuid = podcastUuid,
+        fragmentManager = fragmentManager,
+    )
 }
 
 private fun SwipeSource.toSourceView() = when (this) {

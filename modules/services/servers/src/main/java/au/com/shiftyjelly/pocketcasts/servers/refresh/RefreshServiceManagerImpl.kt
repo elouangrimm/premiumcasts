@@ -2,20 +2,16 @@ package au.com.shiftyjelly.pocketcasts.servers.refresh
 
 import android.os.Build
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
-import au.com.shiftyjelly.pocketcasts.servers.di.RefreshServiceRetrofit
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import java.io.IOException
 import java.util.Locale
 import javax.inject.Inject
 import retrofit2.Response
-import retrofit2.Retrofit
 
 class RefreshServiceManagerImpl @Inject constructor(
-    @RefreshServiceRetrofit retrofit: Retrofit,
+    private val service: RefreshService,
     private val settings: Settings,
 ) : RefreshServiceManager {
-    private val service: RefreshService = retrofit.create(RefreshService::class.java)
-
     override suspend fun importOpml(urls: List<String>): Response<StatusResponse<ImportOpmlResponse>> {
         val request = ImportOpmlRequest(urls = urls)
         addDeviceParameters(request)
@@ -53,7 +49,9 @@ class RefreshServiceManagerImpl @Inject constructor(
                         UpdatePodcastResponse.NoEpisodeFound
                     }
                 }
+
                 200 -> UpdatePodcastResponse.EpisodeFound
+
                 else -> UpdatePodcastResponse.NoEpisodeFound
             }
         } catch (e: IOException) {

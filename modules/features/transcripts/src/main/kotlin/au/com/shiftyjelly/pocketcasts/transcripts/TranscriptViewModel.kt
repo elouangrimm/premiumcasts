@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.analytics.Tracker
 import au.com.shiftyjelly.pocketcasts.models.to.Transcript
 import au.com.shiftyjelly.pocketcasts.models.to.TranscriptEntry
 import au.com.shiftyjelly.pocketcasts.payment.BillingCycle
@@ -19,6 +20,9 @@ import au.com.shiftyjelly.pocketcasts.sharing.SharingRequest
 import au.com.shiftyjelly.pocketcasts.utils.search.SearchCoordinates
 import au.com.shiftyjelly.pocketcasts.utils.search.SearchMatches
 import au.com.shiftyjelly.pocketcasts.utils.search.kmpSearch
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.Trackable
+import com.automattic.eventhorizon.TranscriptSource
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -41,6 +45,7 @@ class TranscriptViewModel @AssistedInject constructor(
     private val userManager: UserManager,
     private val paymentClient: PaymentClient,
     private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     private val sharingClient: TranscriptSharingClient,
 ) : ViewModel() {
 
@@ -211,16 +216,23 @@ class TranscriptViewModel @AssistedInject constructor(
 
             val request = SharingRequest
                 .transcript(
-                    podcastUuid = episode?.podcastUuid,
+                    podcastUuid = episode?.podcastUuid.orEmpty(),
                     episodeUuid = transcript.episodeUuid,
                     episodeTitle = episode?.title.orEmpty(),
                     transcript = text,
+                    source = sourceView,
                 )
-                .setSourceView(sourceView)
                 .build()
 
             sharingClient.shareTranscript(request)
         }
+    }
+
+    fun track(event: (TranscriptSource, podcastUuid: String, episodeUuid: String) -> Trackable) {
+        val podcastUuid = podcastUuid ?: Tracker.INVALID_OR_NULL_VALUE
+        val episodeUuid = episodeUuid ?: Tracker.INVALID_OR_NULL_VALUE
+        val event = event(source.eventHorizonValue, podcastUuid, episodeUuid)
+        eventHorizon.track(event)
     }
 
     fun track(
@@ -246,14 +258,17 @@ class TranscriptViewModel @AssistedInject constructor(
     }
 
     enum class Source(
-        val analyticsValue: String,
+        val eventHorizonValue: TranscriptSource,
     ) {
         Episode(
-            analyticsValue = "episode",
+            eventHorizonValue = TranscriptSource.Episode,
         ),
         Player(
-            analyticsValue = "player",
+            eventHorizonValue = TranscriptSource.Player,
         ),
+        ;
+
+        val analyticsValue get() = eventHorizonValue.toString()
     }
 
     @AssistedFactory

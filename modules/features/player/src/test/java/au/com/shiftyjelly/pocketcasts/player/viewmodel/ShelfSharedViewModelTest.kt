@@ -4,6 +4,7 @@ import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import app.cash.turbine.test
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
+import au.com.shiftyjelly.pocketcasts.analytics.testing.TestEventSink
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast
 import au.com.shiftyjelly.pocketcasts.models.entity.PodcastEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.UserEpisode
@@ -23,12 +24,12 @@ import au.com.shiftyjelly.pocketcasts.repositories.chromecast.ChromeCastAnalytic
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackManager
 import au.com.shiftyjelly.pocketcasts.repositories.playback.PlaybackState
 import au.com.shiftyjelly.pocketcasts.repositories.playback.UpNextQueue
-import au.com.shiftyjelly.pocketcasts.repositories.podcast.ChapterManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingUpgradeSource
 import au.com.shiftyjelly.pocketcasts.sharedtest.MainCoroutineRule
+import com.automattic.eventhorizon.EventHorizon
 import io.reactivex.Observable
 import java.time.Instant
 import java.util.Date
@@ -63,9 +64,6 @@ class ShelfSharedViewModelTest {
     private lateinit var applicationScope: CoroutineScope
 
     @Mock
-    private lateinit var analyticsTracker: AnalyticsTracker
-
-    @Mock
     private lateinit var chromeCastAnalytics: ChromeCastAnalytics
 
     @Mock
@@ -85,9 +83,6 @@ class ShelfSharedViewModelTest {
 
     @Mock
     private lateinit var userEpisodeManager: UserEpisodeManager
-
-    @Mock
-    private lateinit var chapterManager: ChapterManager
 
     private lateinit var shelfSharedViewModel: ShelfSharedViewModel
 
@@ -330,7 +325,8 @@ class ShelfSharedViewModelTest {
         whenever(settings.cachedSubscription).thenReturn(userSubscriptionSetting)
 
         shelfSharedViewModel = ShelfSharedViewModel(
-            analyticsTracker = analyticsTracker,
+            analyticsTracker = AnalyticsTracker.test(),
+            eventHorizon = EventHorizon(TestEventSink()),
             applicationScope = applicationScope,
             chromeCastAnalytics = chromeCastAnalytics,
             episodeManager = episodeManager,
@@ -339,7 +335,7 @@ class ShelfSharedViewModelTest {
             settings = settings,
             userEpisodeManager = userEpisodeManager,
             transcriptManager = mock(),
-            chapterManager = chapterManager,
+            downloadQueue = mock(),
         )
     }
 }

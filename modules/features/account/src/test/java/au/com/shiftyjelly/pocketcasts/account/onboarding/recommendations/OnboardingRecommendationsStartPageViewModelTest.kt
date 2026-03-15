@@ -4,7 +4,7 @@ import android.app.Application
 import android.content.res.Resources
 import app.cash.turbine.test
 import au.com.shiftyjelly.pocketcasts.account.viewmodel.OnboardingRecommendationsStartPageViewModel
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.testing.TestEventSink
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.UserSetting
 import au.com.shiftyjelly.pocketcasts.repositories.categories.CategoriesManager
@@ -22,8 +22,7 @@ import au.com.shiftyjelly.pocketcasts.servers.model.ListFeed
 import au.com.shiftyjelly.pocketcasts.servers.model.ListType
 import au.com.shiftyjelly.pocketcasts.sharedtest.InMemoryFeatureFlagRule
 import au.com.shiftyjelly.pocketcasts.sharedtest.MainCoroutineRule
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
+import com.automattic.eventhorizon.EventHorizon
 import io.reactivex.Flowable
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +45,6 @@ class OnboardingRecommendationsStartPageViewModelTest {
 
     private val podcastManager = mock<PodcastManager>()
     private val playbackManager = mock<PlaybackManager>()
-    private val analyticsTracker = mock<AnalyticsTracker>()
     private val repository = mock<ListRepository>()
     private val settings = mock<Settings>()
     private val categoriesManager = mock<CategoriesManager>()
@@ -68,7 +66,6 @@ class OnboardingRecommendationsStartPageViewModelTest {
 
     @Test
     fun `should prioritize interest categories when FF is on and interests are set`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS, true)
         whenever(categoriesManager.interestCategories).thenReturn(MutableStateFlow(mockCategories.takeLast(3).toSet()).asStateFlow())
 
         val viewModel = createViewModel()
@@ -81,7 +78,6 @@ class OnboardingRecommendationsStartPageViewModelTest {
 
     @Test
     fun `should return normal recommendations when FF is on but interests are empty`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS, true)
         whenever(categoriesManager.interestCategories).thenReturn(MutableStateFlow(emptySet()))
 
         val viewModel = createViewModel()
@@ -91,22 +87,10 @@ class OnboardingRecommendationsStartPageViewModelTest {
         }
     }
 
-    @Test
-    fun `should return normal recommendations when FF is off`() = runTest {
-        FeatureFlag.setEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS, false)
-        whenever(categoriesManager.interestCategories).thenReturn(MutableStateFlow(emptySet()))
-
-        val viewModel = createViewModel()
-        viewModel.state.test {
-            val item = awaitItem()
-            assert(item.sections.take(2).map { it.title }.all { it in mockCategories.take(3).map { it.title } })
-        }
-    }
-
     private fun createViewModel() = OnboardingRecommendationsStartPageViewModel(
         podcastManager = podcastManager,
         playbackManager = playbackManager,
-        analyticsTracker = analyticsTracker,
+        eventHorizon = EventHorizon(TestEventSink()),
         repository = repository,
         settings = settings,
         app = application,

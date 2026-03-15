@@ -76,11 +76,15 @@ fun ShelfBottomSheetPage(
             onClick = { item, enabled ->
                 when (item) {
                     ShelfItem.Effects -> shelfSharedViewModel.onEffectsClick(ShelfItemSource.OverflowMenu)
+
                     ShelfItem.Sleep -> {
                         shelfSharedViewModel.onSleepClick(ShelfItemSource.OverflowMenu)
                     }
+
                     ShelfItem.Star -> shelfSharedViewModel.onStarClick(ShelfItemSource.OverflowMenu)
+
                     ShelfItem.Transcript -> shelfSharedViewModel.onTranscriptClick(enabled, ShelfItemSource.OverflowMenu)
+
                     ShelfItem.Share -> {
                         val podcast = playerViewModel.podcast ?: return@MenuShelfItems
                         val episode = playerViewModel.episode as? PodcastEpisode ?: return@MenuShelfItems
@@ -93,6 +97,7 @@ fun ShelfBottomSheetPage(
                     }
 
                     ShelfItem.Podcast -> shelfSharedViewModel.onShowPodcastOrCloudFiles(playerViewModel.podcast, ShelfItemSource.OverflowMenu)
+
                     ShelfItem.Cast -> {
                         coroutineScope.launch {
                             shelfSharedViewModel.trackShelfAction(item, ShelfItemSource.OverflowMenu)
@@ -122,16 +127,19 @@ fun ShelfBottomSheetPage(
                         OnboardingUpgradeSource.BOOKMARKS_SHELF_ACTION,
                         ShelfItemSource.OverflowMenu,
                     )
+
                     ShelfItem.Download -> {
                         playerViewModel.handleDownloadClickFromPlaybackActions(
                             onDownloadStart = { shelfSharedViewModel.onEpisodeDownloadStart(ShelfItemSource.OverflowMenu) },
                             onDeleteStart = { shelfSharedViewModel.onEpisodeRemoveClick(ShelfItemSource.OverflowMenu) },
                         )
                     }
+
                     ShelfItem.AddToPlaylist -> {
-                        val episodeUuid = playerViewModel.episode?.uuid ?: return@MenuShelfItems
+                        val episode = playerViewModel.episode ?: return@MenuShelfItems
                         shelfSharedViewModel.onAddToPlaylistClick(
-                            episodeUuid = episodeUuid,
+                            episodeUuid = episode.uuid,
+                            podcastUuid = episode.podcastOrSubstituteUuid,
                             source = ShelfItemSource.OverflowMenu,
                         )
                     }

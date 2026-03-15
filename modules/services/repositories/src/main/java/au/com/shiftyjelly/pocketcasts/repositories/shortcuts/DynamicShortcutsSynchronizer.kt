@@ -8,14 +8,12 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.core.content.getSystemService
 import androidx.room.concurrent.AtomicBoolean
+import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.deeplink.ShowPlaylistDeepLink
 import au.com.shiftyjelly.pocketcasts.models.db.dao.PlaylistDao
 import au.com.shiftyjelly.pocketcasts.models.to.PlaylistShortcut
-import au.com.shiftyjelly.pocketcasts.repositories.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.repositories.extensions.shortcutDrawableId
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.Playlist
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -36,7 +34,7 @@ class DynamicShortcutsSynchronizer @Inject constructor(
         if (!isMonitoring.getAndSet(true) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
             scope.launch {
                 playlistDao
-                    .playlistShortcutFlow(allowManual = FeatureFlag.isEnabled(Feature.PLAYLISTS_REBRANDING, immutable = true))
+                    .playlistShortcutFlow()
                     .distinctUntilChanged()
                     .collect { playlist -> setDynamicShortcuts(shortcutManager, playlist) }
             }

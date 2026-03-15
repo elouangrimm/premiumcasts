@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
@@ -31,6 +30,7 @@ dependencies {
     api(libs.moshi)
     api(libs.navigation.runtime)
 
+    api(projects.modules.services.coroutines)
     api(projects.modules.features.search)
     api(projects.modules.features.settings)
     api(projects.modules.services.analytics)
@@ -48,6 +48,7 @@ dependencies {
     implementation(libs.androidx.preference.ktx)
     implementation(libs.coil)
     implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
     implementation(libs.compose.activity)
     implementation(libs.compose.animation)
     implementation(libs.compose.constraintlayout)
@@ -95,4 +96,5 @@ dependencies {
     testImplementation(libs.turbine)
 
     testImplementation(projects.modules.services.sharedtest)
+    testImplementation(projects.modules.services.analytics.testing)
 }

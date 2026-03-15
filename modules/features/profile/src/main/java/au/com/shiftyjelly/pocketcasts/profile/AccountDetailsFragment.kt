@@ -19,8 +19,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import au.com.shiftyjelly.pocketcasts.account.ChangeEmailFragment
 import au.com.shiftyjelly.pocketcasts.account.ChangePwdFragment
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.compose.extensions.contentWithoutConsumedInsets
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.profile.champion.PocketCastsChampionBottomSheetDialog
@@ -44,6 +42,12 @@ import au.com.shiftyjelly.pocketcasts.utils.extensions.pxToDp
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import au.com.shiftyjelly.pocketcasts.views.dialog.ConfirmationDialog
 import au.com.shiftyjelly.pocketcasts.views.fragments.BaseFragment
+import com.automattic.eventhorizon.AccountDetailsCancelTappedEvent
+import com.automattic.eventhorizon.AccountDetailsChangeAvatarEvent
+import com.automattic.eventhorizon.AccountDetailsShowPrivacyPolicyEvent
+import com.automattic.eventhorizon.AccountDetailsShowTosEvent
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.PlusPromotionBannerButtonTappedEvent
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -61,7 +65,7 @@ class AccountDetailsFragment : BaseFragment() {
         }
     }
 
-    @Inject lateinit var analyticsTracker: AnalyticsTracker
+    @Inject lateinit var eventHorizon: EventHorizon
 
     @Inject lateinit var episodeManager: EpisodeManager
 
@@ -94,7 +98,7 @@ class AccountDetailsFragment : BaseFragment() {
             isAutomotive = remember { Util.isAutomotive(requireContext()) },
             miniPlayerPadding = accountViewModel.miniPlayerInset.collectAsState().value.pxToDp(requireContext()).dp,
             headerState = accountViewModel.headerState.collectAsState().value,
-            upgradeBannerState = accountViewModel.upgradeBannerState.collectAsState().value,
+            recommendedPlan = accountViewModel.recommendedPlanState.collectAsState().value,
             sectionsState = accountViewModel.sectionsState.collectAsState().value,
         )
 
@@ -102,26 +106,15 @@ class AccountDetailsFragment : BaseFragment() {
             state = state,
             theme = theme.activeTheme,
             onNavigateBack = {
-                @Suppress("DEPRECATION")
-                requireActivity().onBackPressed()
+                requireActivity().onBackPressedDispatcher.onBackPressed()
             },
             onClickHeader = {
                 if (state.headerState.subscription.isChampion) {
                     PocketCastsChampionBottomSheetDialog().show(childFragmentManager, "pocket_casts_champion_dialog")
                 }
             },
-            onClickSubscribe = { planKey ->
-                analyticsTracker.track(AnalyticsEvent.PLUS_PROMOTION_UPGRADE_BUTTON_TAPPED)
-                val source = OnboardingUpgradeSource.PROFILE
-                val onboardingFlow = OnboardingFlow.PlusAccountUpgrade(source, planKey.tier, planKey.billingCycle)
-                OnboardingLauncher.openOnboardingFlow(requireActivity(), onboardingFlow)
-            },
-            onChangeFeatureCard = { planKey ->
-                analyticsTracker.track(AnalyticsEvent.PLUS_PROMOTION_SUBSCRIPTION_TIER_CHANGED, mapOf("value" to planKey.tier.analyticsValue))
-                accountViewModel.changeSelectedFeatureCard(planKey)
-            },
             onChangeAvatar = { email ->
-                analyticsTracker.track(AnalyticsEvent.ACCOUNT_DETAILS_CHANGE_AVATAR)
+                eventHorizon.track(AccountDetailsChangeAvatarEvent)
                 Gravatar.refreshGravatarTimestamp()
                 requireActivity().startActivity(Intent(Intent.ACTION_VIEW, Gravatar.getGravatarChangeAvatarUrl(email).toUri()))
             },
@@ -137,7 +130,7 @@ class AccountDetailsFragment : BaseFragment() {
                 OnboardingLauncher.openOnboardingFlow(requireActivity(), onboardingFlow)
             },
             onCancelSubscription = { winbackParams ->
-                analyticsTracker.track(AnalyticsEvent.ACCOUNT_DETAILS_CANCEL_TAPPED)
+                eventHorizon.track(AccountDetailsCancelTappedEvent)
                 WinbackFragment
                     .create(winbackParams)
                     .show(childFragmentManager, "subscription_winback")
@@ -146,18 +139,23 @@ class AccountDetailsFragment : BaseFragment() {
                 accountViewModel.updateNewsletter(isChecked)
             },
             onShowPrivacyPolicy = {
-                analyticsTracker.track(AnalyticsEvent.ACCOUNT_DETAILS_SHOW_PRIVACY_POLICY)
+                eventHorizon.track(AccountDetailsShowPrivacyPolicyEvent)
                 requireActivity().startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Settings.INFO_PRIVACY_URL)))
             },
             onShowTermsOfUse = {
-                analyticsTracker.track(AnalyticsEvent.ACCOUNT_DETAILS_SHOW_TOS)
+                eventHorizon.track(AccountDetailsShowTosEvent)
                 requireActivity().startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Settings.INFO_TOS_URL)))
             },
             onSignOut = { signOut() },
             onDeleteAccount = { deleteAccount() },
             onAccountUpgradeClick = {
-                analyticsTracker.track(AnalyticsEvent.PLUS_PROMOTION_UPGRADE_BUTTON_TAPPED, mapOf("version" to "1"))
-                val onboardingFlow = OnboardingFlow.NewOnboardingAccountUpgrade
+                val onboardingFlow = OnboardingFlow.AccountUpgrade
+                eventHorizon.track(
+                    PlusPromotionBannerButtonTappedEvent(
+                        source = OnboardingUpgradeSource.PROFILE.eventHorizonValue,
+                        flow = onboardingFlow.eventHorizonValue,
+                    ),
+                )
                 OnboardingLauncher.openOnboardingFlow(requireActivity(), onboardingFlow)
             },
         )
@@ -277,7 +275,6 @@ class AccountDetailsFragment : BaseFragment() {
     private fun performSignOut() {
         LogBuffer.i(LogBuffer.TAG_BACKGROUND_TASKS, "User requested to sign out")
         userManager.signOut(playbackManager, wasInitiatedByUser = true)
-        @Suppress("DEPRECATION")
-        activity?.onBackPressed()
+        activity?.onBackPressedDispatcher?.onBackPressed()
     }
 }

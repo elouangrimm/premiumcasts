@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import au.com.shiftyjelly.pocketcasts.analytics.EpisodeAnalytics
+import au.com.shiftyjelly.pocketcasts.analytics.testing.TestEventSink
 import au.com.shiftyjelly.pocketcasts.models.db.dao.EpisodeDao
 import au.com.shiftyjelly.pocketcasts.models.di.ModelModule
 import au.com.shiftyjelly.pocketcasts.models.di.addTypeConverters
@@ -16,8 +16,6 @@ import au.com.shiftyjelly.pocketcasts.models.to.AutoArchiveLimit
 import au.com.shiftyjelly.pocketcasts.models.type.EpisodePlayingStatus
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.UserSetting
-import au.com.shiftyjelly.pocketcasts.repositories.download.DownloadManager
-import au.com.shiftyjelly.pocketcasts.repositories.file.FileStorage
 import au.com.shiftyjelly.pocketcasts.repositories.playback.UpNextQueue
 import au.com.shiftyjelly.pocketcasts.repositories.playback.UpNextQueueImpl
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.EpisodeManager
@@ -26,6 +24,7 @@ import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.UserEpisodeManager
 import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.servers.podcast.PodcastCacheServiceManager
+import com.automattic.eventhorizon.EventHorizon
 import com.squareup.moshi.Moshi
 import java.util.Calendar
 import java.util.Date
@@ -48,12 +47,9 @@ import org.mockito.kotlin.mock
 class AutoArchiveTest {
     lateinit var testDb: AppDatabase
     lateinit var episodeDao: EpisodeDao
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val fileStorage = mock<FileStorage> {}
-    val downloadManager = mock<DownloadManager> {}
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
     val podcastCacheServiceManager = mock<PodcastCacheServiceManager> {}
     val userEpisodeManager = mock<UserEpisodeManager> {}
-    val episodeAnalytics = EpisodeAnalytics(mock())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val testDispatcher = UnconfinedTestDispatcher()
@@ -86,14 +82,13 @@ class AutoArchiveTest {
         }
         return EpisodeManagerImpl(
             settings = settings,
-            fileStorage = fileStorage,
-            downloadManager = downloadManager,
+            downloadQueue = mock(),
             context = context,
             appDatabase = db,
             podcastCacheServiceManager = podcastCacheServiceManager,
             userEpisodeManager = userEpisodeManager,
             ioDispatcher = testDispatcher,
-            episodeAnalytics = episodeAnalytics,
+            eventHorizon = EventHorizon(TestEventSink()),
         )
     }
 
@@ -110,7 +105,7 @@ class AutoArchiveTest {
         }
         val context = mock<Context>()
         val syncManager = mock<SyncManager>()
-        return UpNextQueueImpl(db, settings, episodeManager, syncManager, context)
+        return UpNextQueueImpl(db, settings, episodeManager, syncManager, mock(), context)
     }
 
     @Test
@@ -539,7 +534,7 @@ class AutoArchiveTest {
         val updatedNewEpisode = episodeDao.findByUuid(newUUID)!!
         assertTrue("Episode should be archived as it was archive modified 8 day ago (inactive setting = 7d)", updatedNewEpisode.isArchived)
 
-        runBlocking { upNext.playLast(updatedNewEpisode, downloadManager, null) }
+        runBlocking { upNext.playLast(updatedNewEpisode, onAdd = null) }
 
         val updatedNewEpisodeInUpNext = episodeDao.findByUuid(newUUID)!!
         assertTrue("Episode should not be archived as it was added to up next", !updatedNewEpisodeInUpNext.isArchived)

@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +39,9 @@ fun NavGraphBuilder.authenticationNavGraph(
     navController: NavController,
     onEmailSignInSuccess: () -> Unit,
     googleSignInSuccessScreen: @Composable (GoogleAccountData) -> Unit,
+    syncState: State<WatchSyncState>,
+    onRetrySync: () -> Unit = {},
+    onSyncScreenVisible: () -> Unit = {},
 ) {
     navigation(
         startDestination = AuthenticationNavRoutes.LOGIN_SCREEN,
@@ -75,8 +79,11 @@ fun NavGraphBuilder.authenticationNavGraph(
         composable(
             route = AuthenticationNavRoutes.LOGIN_WITH_PHONE,
         ) {
+            LaunchedEffect(Unit) { onSyncScreenVisible() }
             LoginWithPhoneScreen(
                 onLoginClick = { navController.popBackStack() },
+                syncState = syncState.value,
+                onRetry = onRetrySync,
             )
         }
 

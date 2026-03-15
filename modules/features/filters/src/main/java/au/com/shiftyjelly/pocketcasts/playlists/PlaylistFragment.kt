@@ -104,6 +104,7 @@ class PlaylistFragment :
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {
             viewModel.trackFilterShown()
+            viewModel.setSelectedPlaylist()
         }
     }
 
@@ -435,8 +436,7 @@ class PlaylistFragment :
                     ContentState.HasEpisode -> ToolbarConfig.ForAlpha(toolbarAlpha)
                 },
                 onClickBack = {
-                    @Suppress("DEPRECATION")
-                    requireActivity().onBackPressed()
+                    requireActivity().onBackPressedDispatcher.onBackPressed()
                 },
                 onClickOptions = {
                     viewModel.trackFilterOptionsButtonTapped()
@@ -529,6 +529,13 @@ class PlaylistFragment :
             addToBackStack("playlist_settings")
             add(R.id.playlistFragmentContainer, SettingsFragment(), "playlist_settings")
         }
+    }
+
+    override fun onPause() {
+        if (isRemoving) {
+            viewModel.clearSelectedPlaylist()
+        }
+        super.onPause()
     }
 
     override fun onBackPressed(): Boolean {

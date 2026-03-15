@@ -53,7 +53,7 @@ fun OnboardingUpgradeFlow(
     if (forceAutoPurchase) {
         activity?.let {
             LaunchedEffect(Unit) {
-                viewModel.purchaseSelectedPlan(activity, onProceed)
+                viewModel.purchaseSelectedPlan(activity = activity, onComplete = onProceed, source = source)
             }
         }
     }
@@ -85,6 +85,7 @@ fun OnboardingUpgradeFlow(
             }
 
             ModalBottomSheetValue.Expanded -> viewModel.onSelectPaymentFrequencyShown(flow, source)
+
             else -> {}
         }
     }
@@ -127,7 +128,7 @@ fun OnboardingUpgradeFlow(
                                         sheetState.show()
                                     }
                                 } else {
-                                    viewModel.purchaseSelectedPlan(activity, onProceed)
+                                    viewModel.purchaseSelectedPlan(activity = activity, onComplete = onProceed, source = source)
                                 }
                             } else {
                                 onNeedLogin()
@@ -147,16 +148,16 @@ fun OnboardingUpgradeFlow(
                 state = state,
                 onClickSubscribe = {
                     if (activity != null) {
-                        viewModel.purchaseSelectedPlan(activity, onProceed)
+                        viewModel.purchaseSelectedPlan(activity = activity, onComplete = onProceed, source = source)
                     } else {
                         LogBuffer.e(LogBuffer.TAG_SUBSCRIPTIONS, NULL_ACTIVITY_ERROR)
                     }
                 },
                 onPrivacyPolicyClick = {
-                    viewModel.onPrivacyPolicyPressed()
+                    viewModel.onPrivacyPolicyPressed(source)
                 },
                 onTermsAndConditionsClick = {
-                    viewModel.onTermsAndConditionsPressed()
+                    viewModel.onTermsAndConditionsPressed(source)
                 },
             )
         },

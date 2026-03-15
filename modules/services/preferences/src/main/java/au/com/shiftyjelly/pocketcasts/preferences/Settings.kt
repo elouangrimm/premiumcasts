@@ -26,8 +26,10 @@ import au.com.shiftyjelly.pocketcasts.preferences.model.NewEpisodeNotificationAc
 import au.com.shiftyjelly.pocketcasts.preferences.model.NotificationVibrateSetting
 import au.com.shiftyjelly.pocketcasts.preferences.model.PlayOverNotificationSetting
 import au.com.shiftyjelly.pocketcasts.preferences.model.PodcastGridLayoutType
+import au.com.shiftyjelly.pocketcasts.preferences.model.SelectedPlaylist
 import au.com.shiftyjelly.pocketcasts.preferences.model.ShelfItem
 import au.com.shiftyjelly.pocketcasts.preferences.model.ThemeSetting
+import com.automattic.eventhorizon.UploadedFilesSortType
 import io.reactivex.Observable
 import java.time.Instant
 import java.util.Date
@@ -87,10 +89,10 @@ interface Settings {
         const val PREFERENCE_LAST_MODIFIED = "lastModified"
         const val PREFERENCE_FIRST_SYNC_RUN = "firstSyncRun"
         const val PREFERENCE_GLOBAL_STREAMING_MODE = "globalStreamingMode"
-        const val PREFERENCE_SELECTED_FILTER = "selectedFilter"
         const val PREFERENCE_CHAPTERS_EXPANDED = "chaptersExpanded"
         const val PREFERENCE_UPNEXT_EXPANDED = "upnextExpanded"
         const val INTELLIGENT_PLAYBACK_RESUMPTION = "intelligentPlaybackResumption"
+        const val UP_NEXT_BADGE_MAX_COUNT = 999
 
         const val STORAGE_ON_CUSTOM_FOLDER = "custom_folder"
 
@@ -170,34 +172,36 @@ interface Settings {
     }
 
     enum class CloudSortOrder(
-        val analyticsValue: String,
         val serverId: Int,
+        val eventHorizonValue: UploadedFilesSortType,
     ) {
         NEWEST_OLDEST(
-            analyticsValue = "newest_to_oldest",
             serverId = 0,
+            eventHorizonValue = UploadedFilesSortType.NewestToOldest,
         ),
         OLDEST_NEWEST(
-            analyticsValue = "oldest_to_newest",
             serverId = 1,
+            eventHorizonValue = UploadedFilesSortType.OldestToNewest,
         ),
         A_TO_Z(
-            analyticsValue = "title_a_to_z",
             serverId = 2,
+            eventHorizonValue = UploadedFilesSortType.TitleAToZ,
         ),
         Z_TO_A(
-            analyticsValue = "title_z_to_a",
             serverId = 3,
+            eventHorizonValue = UploadedFilesSortType.TitleZToA,
         ),
         SHORT_LONG(
-            analyticsValue = "shortest_to_longest",
             serverId = 4,
+            eventHorizonValue = UploadedFilesSortType.ShortestToLongest,
         ),
         LONG_SHORT(
-            analyticsValue = "longest_to_shortest",
             serverId = 5,
+            eventHorizonValue = UploadedFilesSortType.LongestToShortest,
         ),
         ;
+
+        val analyticsValue get() = eventHorizonValue.toString()
 
         companion object {
             fun fromServerId(id: Int) = entries.find { it.serverId == id }
@@ -273,6 +277,9 @@ interface Settings {
         )
     }
 
+    val currentSessionId: String
+    val sessionIds: List<String>
+
     val selectPodcastSortTypeObservable: Observable<PodcastsSortType>
     val multiSelectItemsObservable: Observable<List<String>>
     val refreshStateFlow: StateFlow<RefreshState>
@@ -330,7 +337,7 @@ interface Settings {
 
     val playOverNotification: UserSetting<PlayOverNotificationSetting>
 
-    val autoDownloadLimit: UserSetting<AutoDownloadLimitSetting>
+    val autoDownloadLimit: ReadWriteSetting<AutoDownloadLimitSetting>
 
     fun setLastModified(lastModified: String?)
     fun getLastModified(): String?
@@ -362,9 +369,9 @@ interface Settings {
 
     val autoDownloadUnmeteredOnly: UserSetting<Boolean>
     val autoDownloadOnlyWhenCharging: UserSetting<Boolean>
-    val autoDownloadUpNext: UserSetting<Boolean>
+    val autoDownloadUpNext: ReadWriteSetting<Boolean>
     val autoDownloadOnFollowPodcast: UserSetting<Boolean>
-    val autoDownloadNewEpisodes: UserSetting<Int>
+    val autoDownloadNewEpisodes: ReadWriteSetting<Int>
 
     val artworkConfiguration: UserSetting<ArtworkConfiguration>
 
@@ -384,6 +391,8 @@ interface Settings {
     fun getUpNextServerModified(): Long
     fun setHistoryServerModified(timeMs: Long)
     fun getHistoryServerModified(): Long
+    fun setStarredServerModified(timeMs: Long)
+    fun getStarredServerModified(): Long
     fun setClearHistoryTime(timeMs: Long)
     fun setClearHistoryTimeNow()
     fun getClearHistoryTime(): Long
@@ -409,10 +418,9 @@ interface Settings {
     val autoArchiveAfterPlaying: UserSetting<AutoArchiveAfterPlaying>
     val autoArchiveInactive: UserSetting<AutoArchiveInactive>
 
-    fun selectedFilter(): String?
-    fun setSelectedFilter(filterUUID: String?)
     fun selectedTab(): Int?
     fun setSelectedTab(selected: Int?)
+    val selectedPlaylist: ReadWriteSetting<SelectedPlaylist?>
 
     fun contains(key: String, isPrivate: Boolean = false): Boolean
 
@@ -445,7 +453,7 @@ interface Settings {
     val deleteLocalFileAfterPlaying: UserSetting<Boolean>
     val deleteCloudFileAfterPlaying: UserSetting<Boolean>
     val cloudAutoUpload: UserSetting<Boolean>
-    val cloudAutoDownload: UserSetting<Boolean>
+    val cloudAutoDownload: ReadWriteSetting<Boolean>
     val cloudDownloadOnlyOnWifi: UserSetting<Boolean>
     val cachedMembership: UserSetting<Membership>
     val cachedSubscription: ReadSetting<Subscription?>
@@ -590,6 +598,7 @@ interface Settings {
     val showFreeAccountEncouragement: UserSetting<Boolean>
 
     val showPlaylistsOnboarding: UserSetting<Boolean>
+    val saveUpNextAsPlaylist: UserSetting<Boolean>
 
     // App review prompt policy settings
     val appReviewEpisodeCompletedTimestamps: ReadWriteSetting<List<Instant>>
@@ -601,6 +610,12 @@ interface Settings {
     val appReviewBookmarkCreatedTimestamp: ReadWriteSetting<Instant?>
     val appReviewThemeChangedTimestamp: ReadWriteSetting<Instant?>
     val appReviewReferralSharedTimestamp: ReadWriteSetting<Instant?>
+    val appReviewEndOfYearSharedTimestamp: ReadWriteSetting<Instant?>
+    val appReviewEndOfYearCompletedTimestamp: ReadWriteSetting<Instant?>
     val appReviewSubmittedReasons: ReadWriteSetting<List<AppReviewReason>>
     val appReviewLastPromptTimestamp: ReadWriteSetting<Instant?>
+    val appReviewLastDeclineTimestamps: ReadWriteSetting<List<Instant>>
+    val appReviewCrashTimestamp: ReadWriteSetting<Instant?>
+    val appReviewErrorSessionIds: ReadSetting<List<String>>
+    fun recordErrorSession()
 }

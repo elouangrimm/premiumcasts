@@ -30,6 +30,12 @@ enum class AppReviewReason(
     ReferralShared(
         analyticsValue = "referral_shared",
     ),
+    EndOfYearShared(
+        analyticsValue = "end_of_year_shared",
+    ),
+    EndOfYearCompleted(
+        analyticsValue = "end_of_year_completed",
+    ),
     DevelopmentTrigger(
         analyticsValue = "development_trigger",
     ),

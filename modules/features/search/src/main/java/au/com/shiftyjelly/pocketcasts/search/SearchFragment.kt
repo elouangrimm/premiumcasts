@@ -1,5 +1,6 @@
 package au.com.shiftyjelly.pocketcasts.search
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.SearchManager
 import android.content.Context
@@ -114,6 +115,7 @@ class SearchFragment : BaseFragment() {
     val source: SourceView
         get() = SourceView.fromString(arguments?.getString(ARG_SOURCE))
 
+    @SuppressLint("MissingSuperCall") // False positive
     override fun onAttach(context: Context) {
         super.onAttach(context)
         listener = context as Listener
@@ -127,6 +129,7 @@ class SearchFragment : BaseFragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewModel.trackSearchShownOrDismissed(AnalyticsEvent.SEARCH_SHOWN, source)
+        playButtonListener.source = source
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -168,7 +171,9 @@ class SearchFragment : BaseFragment() {
             )
 
             is SearchHistoryEntry.Folder -> listener?.onSearchFolderClick(entry.uuid)
+
             is SearchHistoryEntry.Podcast -> listener?.onSearchPodcastClick(entry.uuid, SourceView.SEARCH)
+
             is SearchHistoryEntry.SearchTerm -> {
                 binding?.let {
                     viewModel.runSearchOnTerm(entry.term)
@@ -186,13 +191,11 @@ class SearchFragment : BaseFragment() {
         val binding = binding ?: return
 
         view.setOnClickListener {
-            @Suppress("DEPRECATION")
-            activity?.onBackPressed()
+            activity?.onBackPressedDispatcher?.onBackPressed()
         }
 
         binding.backButton.setOnClickListener {
-            @Suppress("DEPRECATION")
-            activity?.onBackPressed()
+            activity?.onBackPressedDispatcher?.onBackPressed()
         }
         viewModel.setSource(source)
 
@@ -229,6 +232,11 @@ class SearchFragment : BaseFragment() {
         searchView.setOnCloseListener {
             UiUtil.hideKeyboard(searchView)
             true
+        }
+
+        searchView.findViewById<View>(androidx.appcompat.R.id.search_close_btn)?.setOnClickListener {
+            analyticsTracker.track(AnalyticsEvent.SEARCH_CLEARED, mapOf("source" to source.analyticsValue))
+            searchView.setQuery("", false)
         }
 
         lifecycleScope.launch {
@@ -318,11 +326,13 @@ class SearchFragment : BaseFragment() {
                             onScroll = { UiUtil.hideKeyboard(searchView) },
                             bottomInset = bottomInset.pxToDp(LocalContext.current).dp,
                             isLoading = suggestions.operation is SearchUiState.SearchOperation.Loading,
+                            isError = suggestions.operation is SearchUiState.SearchOperation.Error,
                             onReportSuggestionsRender = viewModel::trackSuggestionsShown,
+                            onReportViewAllClick = viewModel::onViewAllSuggestionsClick,
                         )
                     }
                 }
-                binding.searchSuggestions.isVisible = state is SearchUiState.Suggestions
+                binding.searchSuggestions.isVisible = state is SearchUiState.Suggestions && !state.searchTerm.isNullOrBlank()
             }
         }
 
@@ -344,6 +354,9 @@ class SearchFragment : BaseFragment() {
                                 onScroll = { UiUtil.hideKeyboard(searchView) },
                                 bottomInset = bottomInset.pxToDp(LocalContext.current).dp,
                                 onFilterSelect = viewModel::selectFilter,
+                                onResultsShow = viewModel::reportResultsShown,
+                                onEmptyResultsShow = viewModel::reportEmptyResultsShown,
+                                onErrorShow = viewModel::reportErrorResultsShown,
                             )
 
                         is SearchUiState.OldResults ->

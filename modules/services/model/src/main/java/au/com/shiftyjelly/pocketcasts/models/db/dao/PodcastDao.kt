@@ -15,7 +15,7 @@ import au.com.shiftyjelly.pocketcasts.models.to.AutoArchiveAfterPlaying
 import au.com.shiftyjelly.pocketcasts.models.to.AutoArchiveInactive
 import au.com.shiftyjelly.pocketcasts.models.to.AutoArchiveLimit
 import au.com.shiftyjelly.pocketcasts.models.to.PodcastGrouping
-import au.com.shiftyjelly.pocketcasts.models.type.EpisodeStatusEnum
+import au.com.shiftyjelly.pocketcasts.models.type.EpisodeDownloadStatus
 import au.com.shiftyjelly.pocketcasts.models.type.EpisodesSortType
 import au.com.shiftyjelly.pocketcasts.models.type.TrimMode
 import au.com.shiftyjelly.pocketcasts.utils.extensions.escapeLike
@@ -28,9 +28,15 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 abstract class PodcastDao {
-    @Transaction
     @Query("SELECT * FROM podcasts WHERE uuid IN (:uuids)")
-    abstract suspend fun findAllIn(uuids: Collection<String>): List<Podcast>
+    protected abstract suspend fun findAllInUnsafe(uuids: Collection<String>): List<Podcast>
+
+    @Transaction
+    open suspend fun findAllIn(uuids: Collection<String>): List<Podcast> {
+        return uuids.chunked(AppDatabase.SQLITE_BIND_ARG_LIMIT).flatMap { chunk ->
+            findAllInUnsafe(chunk)
+        }
+    }
 
     @Transaction
     @Query("SELECT * FROM podcasts WHERE subscribed = 1 ORDER BY LOWER(title) ASC")
@@ -223,10 +229,6 @@ abstract class PodcastDao {
     abstract fun findByUuidRxMaybe(uuid: String): Maybe<Podcast>
 
     @Transaction
-    @Query("SELECT * FROM podcasts WHERE uuid IN (:uuids)")
-    abstract fun findByUuidsBlocking(uuids: Array<String>): List<Podcast>
-
-    @Transaction
     @Query("SELECT * FROM podcasts WHERE folder_uuid = :folderUuid")
     abstract suspend fun findPodcastsInFolder(folderUuid: String): List<Podcast>
 
@@ -286,9 +288,8 @@ abstract class PodcastDao {
     @Update
     abstract suspend fun updateSuspend(podcast: Podcast)
 
-    fun updateRxCompletable(podcast: Podcast): Completable {
-        return Completable.fromCallable { updateBlocking(podcast) }
-    }
+    @Query("UPDATE podcasts SET title = :title, author = :author, podcast_category = :podcastCategory, podcast_description = :podcastDescription, estimated_next_episode = :estimatedNextEpisode, episode_frequency = :episodeFrequency, refresh_available = :refreshAvailable, funding_url = :fundingUrl WHERE uuid = :uuid")
+    abstract suspend fun updateRefresh(uuid: String, title: String, author: String, podcastCategory: String, podcastDescription: String, estimatedNextEpisode: Date?, episodeFrequency: String?, refreshAvailable: Boolean, fundingUrl: String?)
 
     @Query("DELETE FROM podcasts WHERE uuid = :uuid")
     abstract fun deleteByUuidBlocking(uuid: String)
@@ -320,6 +321,9 @@ abstract class PodcastDao {
 
     @Query("SELECT COUNT(*) FROM podcasts")
     abstract fun countBlocking(): Int
+
+    @Query("SELECT COUNT(*) FROM podcasts")
+    abstract suspend fun count(): Int
 
     @Query("SELECT COUNT(*) FROM podcasts WHERE uuid = :uuid")
     abstract fun countByUuidBlocking(uuid: String): Int
@@ -450,7 +454,7 @@ abstract class PodcastDao {
     abstract suspend fun findNotSynced(): List<Podcast>
 
     @Query("SELECT COUNT(*) FROM podcast_episodes WHERE podcast_id = :podcastUuid AND episode_status = :episodeStatus")
-    abstract fun countEpisodesInPodcastWithStatusBlocking(podcastUuid: String, episodeStatus: EpisodeStatusEnum): Int
+    abstract fun countEpisodesInPodcastWithStatusBlocking(podcastUuid: String, episodeStatus: EpisodeDownloadStatus): Int
 
     @Query("UPDATE podcasts SET grouping = :grouping, grouping_modified = :modified, sync_status = 0 WHERE uuid = :uuid")
     abstract fun updateGroupingBlocking(grouping: PodcastGrouping, uuid: String, modified: Date = Date())

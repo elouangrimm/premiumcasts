@@ -2,13 +2,13 @@ package au.com.shiftyjelly.pocketcasts.podcasts.viewmodel.notifications
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.account.viewmodel.NewsletterSource
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.NewsletterOptInChangedEvent
+import com.automattic.eventhorizon.NewsletterSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -24,6 +24,7 @@ import kotlinx.coroutines.reactive.asFlow
 class EnableNotificationsPromptViewModel @Inject constructor(
     private val settings: Settings,
     private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     private val userManager: UserManager,
 ) : ViewModel() {
 
@@ -34,15 +35,13 @@ class EnableNotificationsPromptViewModel @Inject constructor(
     val messagesFlow: SharedFlow<UiMessage> = _messagesFlow
 
     init {
-        if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_ACCOUNT_CREATION)) {
-            viewModelScope.launch {
-                _stateFlow.update {
-                    UiState.NewOnboarding(
-                        showNewsletterOptIn = userManager.getSignInState().asFlow().first().isSignedIn && !settings.marketingOptIn.value,
-                        notificationsEnabled = true,
-                        subscribedToNewsletter = true,
-                    )
-                }
+        viewModelScope.launch {
+            _stateFlow.update {
+                UiState.NewOnboarding(
+                    showNewsletterOptIn = userManager.getSignInState().asFlow().first().isSignedIn && !settings.marketingOptIn.value,
+                    notificationsEnabled = true,
+                    subscribedToNewsletter = true,
+                )
             }
         }
     }
@@ -57,11 +56,10 @@ class EnableNotificationsPromptViewModel @Inject constructor(
             }
 
             is UiState.NewOnboarding -> {
-                analyticsTracker.track(
-                    AnalyticsEvent.NEWSLETTER_OPT_IN_CHANGED,
-                    mapOf(
-                        "source" to NewsletterSource.WELCOME_NEW_ACCOUNT.analyticsValue,
-                        "enabled" to state.subscribedToNewsletter,
+                eventHorizon.track(
+                    NewsletterOptInChangedEvent(
+                        source = NewsletterSource.WelcomeNewAccount,
+                        enabled = state.subscribedToNewsletter,
                     ),
                 )
                 settings.marketingOptIn.set(state.subscribedToNewsletter, updateModifiedAt = true)

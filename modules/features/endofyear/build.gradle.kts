@@ -1,9 +1,9 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.kotlin.parcelize)
 }
 
 android {
@@ -23,6 +23,7 @@ dependencies {
     api(libs.dagger.hilt.android)
 
     api(projects.modules.services.analytics)
+    api(projects.modules.services.coroutines)
     api(projects.modules.services.model)
     api(projects.modules.services.preferences)
     api(projects.modules.services.repositories)
@@ -46,6 +47,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.timber)
     implementation(libs.lottie.compose)
+    implementation(libs.media3.ui.compose)
 
     implementation(projects.modules.features.account)
     implementation(projects.modules.features.settings)

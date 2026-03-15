@@ -2,8 +2,6 @@ package au.com.shiftyjelly.pocketcasts.playlists.manual
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.compose.text.SearchFieldState
 import au.com.shiftyjelly.pocketcasts.models.entity.ManualPlaylistEpisodeSource
 import au.com.shiftyjelly.pocketcasts.models.entity.ManualPlaylistFolderSource
@@ -13,6 +11,13 @@ import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.preferences.model.ArtworkConfiguration
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.ManualPlaylist
 import au.com.shiftyjelly.pocketcasts.repositories.playlist.PlaylistManager
+import com.automattic.eventhorizon.EpisodeAddedToListEvent
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.FilterAddEpisodesEpisodeTappedEvent
+import com.automattic.eventhorizon.FilterAddEpisodesFolderTappedEvent
+import com.automattic.eventhorizon.FilterAddEpisodesPodcastTappedEvent
+import com.automattic.eventhorizon.FilterAddEpisodesShownEvent
+import com.automattic.eventhorizon.PlaylistAddEpisodeSource
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -39,7 +44,7 @@ import kotlinx.coroutines.launch
 class AddEpisodesViewModel @AssistedInject constructor(
     private val playlistManager: PlaylistManager,
     private val settings: Settings,
-    private val tracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     @Assisted private val playlistUuid: String,
 ) : ViewModel() {
     val homeSearchState = SearchFieldState()
@@ -120,23 +125,36 @@ class AddEpisodesViewModel @AssistedInject constructor(
     }
 
     fun trackScreenShown() {
-        tracker.track(AnalyticsEvent.FILTER_ADD_EPISODES_SHOWN)
+        eventHorizon.track(FilterAddEpisodesShownEvent)
     }
 
     fun trackFolderTapped() {
-        tracker.track(AnalyticsEvent.FILTER_ADD_EPISODES_FOLDER_TAPPED)
+        eventHorizon.track(FilterAddEpisodesFolderTappedEvent)
     }
 
     fun trackPodcastTapped() {
-        tracker.track(AnalyticsEvent.FILTER_ADD_EPISODES_PODCAST_TAPPED)
+        eventHorizon.track(FilterAddEpisodesPodcastTappedEvent)
     }
 
-    fun trackEpisodeTapped() {
-        val episodeCount = uiState.value?.playlist?.metadata?.totalEpisodeCount ?: Int.MAX_VALUE
-        tracker.track(
-            AnalyticsEvent.FILTER_ADD_EPISODES_EPISODE_TAPPED,
-            mapOf("is_playlist_full" to (episodeCount >= PlaylistManager.MANUAL_PLAYLIST_EPISODE_LIMIT)),
+    fun trackEpisodeTapped(episode: PodcastEpisode) {
+        val playlist = uiState.value?.playlist ?: return
+        val isPlaylistFull = playlist.metadata.totalEpisodeCount >= PlaylistManager.MANUAL_PLAYLIST_EPISODE_LIMIT
+        eventHorizon.track(
+            FilterAddEpisodesEpisodeTappedEvent(
+                isPlaylistFull = isPlaylistFull,
+            ),
         )
+        if (!isPlaylistFull) {
+            eventHorizon.track(
+                EpisodeAddedToListEvent(
+                    source = PlaylistAddEpisodeSource.PlaylistEditor,
+                    playlistName = playlist.title,
+                    playlistUuid = playlist.uuid,
+                    episodeUuid = episode.uuid,
+                    podcastUuid = episode.podcastUuid,
+                ),
+            )
+        }
     }
 
     data class UiState(

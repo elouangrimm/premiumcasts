@@ -4,18 +4,24 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.account.viewmodel.OnboardingLoginOrSignUpViewModel.Companion.AnalyticsProp
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
 import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.analytics.experiments.ExperimentProvider
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.podcast.PodcastManager
 import au.com.shiftyjelly.pocketcasts.repositories.subscription.SubscriptionManager
 import au.com.shiftyjelly.pocketcasts.repositories.sync.LoginResult
+import au.com.shiftyjelly.pocketcasts.repositories.sync.SignInSource
 import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingFlow
 import au.com.shiftyjelly.pocketcasts.utils.Network
 import au.com.shiftyjelly.pocketcasts.utils.extensions.isGooglePlayServicesAvailableSuccess
+import com.automattic.eventhorizon.CreateAccountDismissedEvent
+import com.automattic.eventhorizon.CreateAccountShownEvent
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.SetupAccountButtonTappedEvent
+import com.automattic.eventhorizon.SetupAccountButtonType
+import com.automattic.eventhorizon.SetupAccountDismissedEvent
+import com.automattic.eventhorizon.SetupAccountShownEvent
 import com.google.android.gms.common.GoogleApiAvailability
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -32,6 +38,7 @@ import au.com.shiftyjelly.pocketcasts.localization.R as LR
 @HiltViewModel
 class OnboardingCreateAccountViewModel @Inject constructor(
     private val syncManager: SyncManager,
+    private val eventHorizon: EventHorizon,
     private val analyticsTracker: AnalyticsTracker,
     private val subscriptionManager: SubscriptionManager,
     private val podcastManager: PodcastManager,
@@ -53,18 +60,53 @@ class OnboardingCreateAccountViewModel @Inject constructor(
     )
     val stateFlow: StateFlow<OnboardingCreateAccountState> = _stateFlow
 
-    fun onShown() {
-        analyticsTracker.track(AnalyticsEvent.CREATE_ACCOUNT_SHOWN)
+    fun onSetupAccountShown(flow: OnboardingFlow) {
+        eventHorizon.track(
+            SetupAccountShownEvent(
+                flow = flow.eventHorizonValue,
+            ),
+        )
     }
 
-    fun onBackPressed() {
-        analyticsTracker.track(AnalyticsEvent.CREATE_ACCOUNT_DISMISSED)
+    fun onCreateAccountShown(flow: OnboardingFlow) {
+        eventHorizon.track(
+            CreateAccountShownEvent(
+                flow = flow.eventHorizonValue,
+            ),
+        )
+    }
+
+    fun onSetupAccountDismissed(flow: OnboardingFlow) {
+        eventHorizon.track(
+            SetupAccountDismissedEvent(
+                flow = flow.eventHorizonValue,
+            ),
+        )
+    }
+
+    fun onCreateAccountDismissed(flow: OnboardingFlow) {
+        eventHorizon.track(
+            CreateAccountDismissedEvent(
+                flow = flow.eventHorizonValue,
+            ),
+        )
     }
 
     fun onSignUpEmailPressed(flow: OnboardingFlow) {
-        analyticsTracker.track(
-            AnalyticsEvent.SETUP_ACCOUNT_BUTTON_TAPPED,
-            mapOf(AnalyticsProp.flow(flow), AnalyticsProp.ButtonTapped.createAccount),
+        eventHorizon.track(
+            SetupAccountButtonTappedEvent(
+                flow = flow.eventHorizonValue,
+                button = SetupAccountButtonType.CreateAccount,
+            ),
+        )
+    }
+
+    fun onLogInPressed(flow: OnboardingFlow) {
+        eventHorizon.track(
+            SetupAccountButtonTappedEvent(
+                flow = flow.eventHorizonValue,
+                button = SetupAccountButtonType.SignIn,
+            ),
         )
     }
 
@@ -97,11 +139,11 @@ class OnboardingCreateAccountViewModel @Inject constructor(
             val result = syncManager.createUserWithEmailAndPassword(
                 email = state.email,
                 password = state.password,
+                signInSource = SignInSource.UserInitiated.Onboarding,
             )
             when (result) {
                 is LoginResult.Success -> {
                     podcastManager.refreshPodcastsAfterSignIn()
-                    experimentProvider.refreshExperiments()
                     analyticsTracker.refreshMetadata()
                     experimentProvider.refreshExperiments()
                     onAccountCreated()

@@ -3,8 +3,7 @@ package au.com.shiftyjelly.pocketcasts.account.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
+import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.localization.helper.tryToLocalise
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.repositories.categories.CategoriesManager
@@ -17,10 +16,16 @@ import au.com.shiftyjelly.pocketcasts.servers.model.DiscoverRow
 import au.com.shiftyjelly.pocketcasts.servers.model.ListType
 import au.com.shiftyjelly.pocketcasts.servers.model.NetworkLoadableList
 import au.com.shiftyjelly.pocketcasts.servers.model.transformWithRegion
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
+import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingFlow
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.PodcastSubscribedEvent
+import com.automattic.eventhorizon.PodcastUnsubscribedEvent
+import com.automattic.eventhorizon.RecommendationsContinueTappedEvent
+import com.automattic.eventhorizon.RecommendationsDismissedEvent
+import com.automattic.eventhorizon.RecommendationsImportTappedEvent
+import com.automattic.eventhorizon.RecommendationsSearchTappedEvent
+import com.automattic.eventhorizon.RecommendationsShownEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.util.Locale
 import javax.inject.Inject
 import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +43,7 @@ import au.com.shiftyjelly.pocketcasts.localization.R as LR
 class OnboardingRecommendationsStartPageViewModel @Inject constructor(
     val podcastManager: PodcastManager,
     val playbackManager: PlaybackManager,
-    val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     private val repository: ListRepository,
     private val settings: Settings,
     app: Application,
@@ -51,7 +56,7 @@ class OnboardingRecommendationsStartPageViewModel @Inject constructor(
     ) {
         private val anySubscribed: Boolean = sections.any { it.anySubscribed }
 
-        val buttonRes = if (anySubscribed || FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS)) {
+        val buttonRes = if (anySubscribed) {
             LR.string.navigation_continue
         } else {
             LR.string.not_now
@@ -86,11 +91,9 @@ class OnboardingRecommendationsStartPageViewModel @Inject constructor(
         val sectionId: SectionId,
         val numToShow: Int,
         private val podcasts: List<Podcast>,
-        private val onShowMoreFun: (Section) -> Unit,
     ) {
         val anySubscribed = podcasts.any { it.isSubscribed }
         val visiblePodcasts = podcasts.take(numToShow)
-        fun onShowMore() = onShowMoreFun(this)
     }
 
     private val _state: MutableStateFlow<State> = MutableStateFlow(State.EMPTY)
@@ -127,7 +130,6 @@ class OnboardingRecommendationsStartPageViewModel @Inject constructor(
                                 sectionId = section.sectionId,
                                 podcasts = podcasts,
                                 numToShow = NUM_TO_SHOW_DEFAULT,
-                                onShowMoreFun = ::onShowMore,
                             )
                     }
                 }.collect { sections ->
@@ -158,7 +160,7 @@ class OnboardingRecommendationsStartPageViewModel @Inject constructor(
             val updatedList = feed.layout.transformWithRegion(region, replacements, getApplication<Application>().resources)
 
             val interestNames = categoriesManager.interestCategories.value.map { it.name }.toSet()
-            if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS) && interestNames.isNotEmpty()) {
+            if (interestNames.isNotEmpty()) {
                 updateFlowWithCategories(sectionsFlow, updatedList, replacements, interestNames)
                 updateFlowWith("featured", sectionsFlow, updatedList, interestNames.size)
                 updateFlowWith("trending", sectionsFlow, updatedList, interestNames.size + 1)
@@ -172,68 +174,67 @@ class OnboardingRecommendationsStartPageViewModel @Inject constructor(
         }
     }
 
-    private fun onShowMore(section: Section) {
-        analyticsTracker.track(
-            AnalyticsEvent.RECOMMENDATIONS_MORE_TAPPED,
-            mapOf(
-                "section" to section.sectionId.value.lowercase(Locale.ENGLISH),
-                "number_visible" to section.numToShow,
+    fun onShown(flow: OnboardingFlow) {
+        eventHorizon.track(
+            RecommendationsShownEvent(
+                flow = flow.eventHorizonValue,
             ),
         )
+    }
 
-        _state.update { oldState ->
-            oldState.copy(
-                sections = oldState.sections.map {
-                    if (it.sectionId == section.sectionId) {
-                        it.copy(numToShow = it.numToShow + NUM_TO_SHOW_INCREASE)
-                    } else {
-                        it
-                    }
-                },
+    fun onBackPressed(flow: OnboardingFlow) {
+        viewModelScope.launch(Dispatchers.IO) {
+            eventHorizon.track(
+                RecommendationsDismissedEvent(
+                    flow = flow.eventHorizonValue,
+                    subscriptions = podcastManager.countSubscribed().toLong(),
+                ),
             )
         }
     }
 
-    fun onShown() {
-        analyticsTracker.track(AnalyticsEvent.RECOMMENDATIONS_SHOWN)
+    fun onSearch(flow: OnboardingFlow) {
+        eventHorizon.track(
+            RecommendationsSearchTappedEvent(
+                flow = flow.eventHorizonValue,
+            ),
+        )
     }
 
-    fun onBackPressed() {
+    fun onImportClick(flow: OnboardingFlow) {
+        eventHorizon.track(
+            RecommendationsImportTappedEvent(
+                flow = flow.eventHorizonValue,
+            ),
+        )
+    }
+
+    fun onComplete(flow: OnboardingFlow) {
         viewModelScope.launch(Dispatchers.IO) {
-            analyticsTracker.track(
-                AnalyticsEvent.RECOMMENDATIONS_DISMISSED,
-                mapOf(AnalyticsProp.SUBSCRIPTIONS to podcastManager.countSubscribed()),
-            )
-        }
-    }
-
-    fun onSearch() {
-        analyticsTracker.track(AnalyticsEvent.RECOMMENDATIONS_SEARCH_TAPPED)
-    }
-
-    fun onImportClick() {
-        analyticsTracker.track(AnalyticsEvent.RECOMMENDATIONS_IMPORT_TAPPED)
-    }
-
-    fun onComplete() {
-        viewModelScope.launch(Dispatchers.IO) {
-            analyticsTracker.track(
-                AnalyticsEvent.RECOMMENDATIONS_CONTINUE_TAPPED,
-                mapOf(AnalyticsProp.SUBSCRIPTIONS to podcastManager.countSubscribed()),
+            eventHorizon.track(
+                RecommendationsContinueTappedEvent(
+                    flow = flow.eventHorizonValue,
+                    subscriptions = podcastManager.countSubscribed().toLong(),
+                ),
             )
         }
     }
 
     fun updateSubscribed(podcast: Podcast) {
-        val event: AnalyticsEvent
-        if (podcast.isSubscribed) {
-            event = AnalyticsEvent.PODCAST_UNSUBSCRIBED
-            podcastManager.unsubscribeAsync(podcastUuid = podcast.uuid, playbackManager = playbackManager)
+        val event = if (podcast.isSubscribed) {
+            podcastManager.unsubscribeAsync(podcastUuid = podcast.uuid, SourceView.ONBOARDING_RECOMMENDATIONS)
+            PodcastUnsubscribedEvent(
+                uuid = podcast.uuid,
+                source = SourceView.ONBOARDING_RECOMMENDATIONS.eventHorizonValue,
+            )
         } else {
-            event = AnalyticsEvent.PODCAST_SUBSCRIBED
             podcastManager.subscribeToPodcast(podcastUuid = podcast.uuid, sync = true)
+            PodcastSubscribedEvent(
+                uuid = podcast.uuid,
+                source = SourceView.ONBOARDING_RECOMMENDATIONS.eventHorizonValue,
+            )
         }
-        analyticsTracker.track(event, AnalyticsProp.podcastSubscribeToggled(podcast.uuid))
+        eventHorizon.track(event)
 
         // Immediately update subscribed state in the UI
         _state.update {
@@ -319,27 +320,19 @@ class OnboardingRecommendationsStartPageViewModel @Inject constructor(
         // Make network calls one at a time so the UI can load the initial sections as quickly
         // as possible, and to maintain the order of the sections
         categories
-            .filter { !FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS) || (it as? DiscoverCategory)?.popularity != null }
+            .filter { (it as? DiscoverCategory)?.popularity != null }
             .sortedWith(
                 compareByDescending<NetworkLoadableList> { it.title in interestCategoryNames }.thenBy {
-                    if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS)) {
-                        val index = interestCategoryNames.indexOf(it.title)
-                        if (index != -1) {
-                            index.toString()
-                        } else {
-                            (it as? DiscoverCategory)?.popularity?.toString() ?: it.title
-                        }
+                    val index = interestCategoryNames.indexOf(it.title)
+                    if (index != -1) {
+                        index.toString()
                     } else {
-                        it.title
+                        (it as? DiscoverCategory)?.popularity?.toString() ?: it.title
                     }
                 },
             )
             .forEach { category ->
-                val source = if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS)) {
-                    (category as? DiscoverCategory)?.onboardingRecommendationsSource ?: category.source
-                } else {
-                    category.source
-                }
+                val source = (category as? DiscoverCategory)?.onboardingRecommendationsSource ?: category.source
                 runCatching {
                     repository.getListFeed(source)
                 }
@@ -361,16 +354,6 @@ class OnboardingRecommendationsStartPageViewModel @Inject constructor(
     }
 
     companion object {
-        private const val ONBOARDING_RECOMMENDATIONS = "onboarding_recommendations"
-
-        private object AnalyticsProp {
-            const val SUBSCRIPTIONS = "subscriptions"
-            const val UUID = "uuid"
-            const val SOURCE = "source"
-            fun podcastSubscribeToggled(uuid: String) = mapOf(UUID to uuid, SOURCE to ONBOARDING_RECOMMENDATIONS)
-        }
-
         const val NUM_TO_SHOW_DEFAULT = 6
-        private const val NUM_TO_SHOW_INCREASE = 6
     }
 }

@@ -12,8 +12,6 @@ import au.com.shiftyjelly.pocketcasts.compose.bars.SystemBarsStyles
 import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingFlow
 import au.com.shiftyjelly.pocketcasts.ui.theme.Theme
 import au.com.shiftyjelly.pocketcasts.utils.Network
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import au.com.shiftyjelly.pocketcasts.localization.R as LR
 
 object OnboardingRecommendationsFlow {
@@ -31,20 +29,16 @@ object OnboardingRecommendationsFlow {
         navController: NavController,
         onUpdateSystemBars: (SystemBarsStyles) -> Unit,
     ) {
-        val root = if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_RECOMMENDATIONS)) {
-            INTERESTS
-        } else {
-            RECOMMENDATIONS
-        }
         navigation(
             route = this@OnboardingRecommendationsFlow.ROUTE,
-            startDestination = root,
+            startDestination = INTERESTS,
         ) {
             importFlowGraph(theme, navController, flow, onUpdateSystemBars)
 
             composable(INTERESTS) {
                 OnboardingInterestsPage(
                     theme = theme,
+                    flow = flow,
                     onBackPress = { navController.popBackStack() },
                     onShowRecommendations = { navController.navigate(RECOMMENDATIONS) },
                     onUpdateSystemBars = onUpdateSystemBars,
@@ -53,7 +47,8 @@ object OnboardingRecommendationsFlow {
 
             composable(RECOMMENDATIONS) {
                 OnboardingRecommendationsStartPage(
-                    theme,
+                    theme = theme,
+                    flow = flow,
                     onImportClick = { navController.navigate(OnboardingImportFlow.ROUTE) },
                     onSearch = with(LocalContext.current) {
                         {

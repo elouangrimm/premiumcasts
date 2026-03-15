@@ -17,8 +17,6 @@ import androidx.annotation.DrawableRes
 import androidx.core.content.IntentCompat
 import androidx.core.os.bundleOf
 import androidx.media.utils.MediaConstants.PLAYBACK_STATE_EXTRAS_KEY_MEDIA_ID
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.EpisodeAnalytics
 import au.com.shiftyjelly.pocketcasts.analytics.SourceView
 import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
 import au.com.shiftyjelly.pocketcasts.models.entity.Podcast
@@ -39,6 +37,9 @@ import au.com.shiftyjelly.pocketcasts.utils.Util
 import au.com.shiftyjelly.pocketcasts.utils.extensions.getLaunchActivityPendingIntent
 import au.com.shiftyjelly.pocketcasts.utils.extensions.roundedSpeed
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
+import com.automattic.eventhorizon.EpisodeArchivedEvent
+import com.automattic.eventhorizon.EpisodeMarkedAsPlayedEvent
+import com.automattic.eventhorizon.EventHorizon
 import io.reactivex.Completable
 import io.reactivex.Observable
 import io.reactivex.Single
@@ -74,7 +75,7 @@ class MediaSessionManager(
     val playlistManager: PlaylistManager,
     val settings: Settings,
     val context: Context,
-    val episodeAnalytics: EpisodeAnalytics,
+    val eventHorizon: EventHorizon,
     val bookmarkManager: BookmarkManager,
     applicationScope: CoroutineScope,
 ) : CoroutineScope {
@@ -435,8 +436,11 @@ class MediaSessionManager(
         settings.mediaControlItems.value.take(visibleCount).forEach { mediaControl ->
             when (mediaControl) {
                 MediaNotificationControls.Archive -> addCustomAction(stateBuilder, APP_ACTION_ARCHIVE, "Archive", IR.drawable.ic_archive)
+
                 MediaNotificationControls.MarkAsPlayed -> addCustomAction(stateBuilder, APP_ACTION_MARK_AS_PLAYED, "Mark as played", IR.drawable.auto_markasplayed)
+
                 MediaNotificationControls.PlayNext -> addCustomAction(stateBuilder, APP_ACTION_PLAY_NEXT, "Play next", com.google.android.gms.cast.framework.R.drawable.cast_ic_mini_controller_skip_next)
+
                 MediaNotificationControls.PlaybackSpeed -> {
                     if (playbackManager.isAudioEffectsAvailable()) {
                         val drawableId = when (playbackState.playbackSpeed.roundedSpeed()) {
@@ -492,6 +496,7 @@ class MediaSessionManager(
                         stateBuilder.addCustomAction(APP_ACTION_CHANGE_SPEED, "Change speed", drawableId)
                     }
                 }
+
                 MediaNotificationControls.Star -> {
                     if (currentEpisode is PodcastEpisode) {
                         if (currentEpisode.isStarred) {
@@ -531,12 +536,12 @@ class MediaSessionManager(
                 logEvent(keyEvent.toString())
                 if (keyEvent.action == KeyEvent.ACTION_DOWN) {
                     LogBuffer.i(LogBuffer.TAG_PLAYBACK, "Media button Android event: ${keyEvent.action}")
+                    /**
+                     * KEYCODE_MEDIA_PLAY_PAUSE - called when the player audio has focus
+                     * KEYCODE_MEDIA_PLAY - can be called when the player doesn't have focus such when sleep mode
+                     * KEYCODE_HEADSETHOOK - called on most wired headsets
+                     */
                     val inputEvent = when (keyEvent.keyCode) {
-                        /**
-                         * KEYCODE_MEDIA_PLAY_PAUSE - called when the player audio has focus
-                         * KEYCODE_MEDIA_PLAY - can be called when the player doesn't have focus such when sleep mode
-                         * KEYCODE_HEADSETHOOK - called on most wired headsets
-                         */
                         KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> MediaEvent.SingleTap
                         KeyEvent.KEYCODE_MEDIA_NEXT -> MediaEvent.DoubleTap
                         KeyEvent.KEYCODE_MEDIA_PREVIOUS -> MediaEvent.TripleTap
@@ -599,15 +604,18 @@ class MediaSessionManager(
         private fun handleMediaButtonAction(action: HeadphoneAction) {
             when (action) {
                 HeadphoneAction.ADD_BOOKMARK -> onAddBookmark()
+
                 HeadphoneAction.SKIP_FORWARD -> {
                     onSkipToNext()
                     if (!playbackManager.isPlaying()) {
                         enqueueCommand("play") { playbackManager.playQueueSuspend(source) }
                     }
                 }
+
                 HeadphoneAction.SKIP_BACK -> {
                     onSkipToPrevious()
                 }
+
                 HeadphoneAction.NEXT_CHAPTER,
                 HeadphoneAction.PREVIOUS_CHAPTER,
                 -> Timber.e(ACTION_NOT_SUPPORTED)
@@ -709,14 +717,21 @@ class MediaSessionManager(
                 APP_ACTION_SKIP_BACK -> enqueueCommand("custom action: skip back") {
                     playbackManager.skipBackwardSuspend()
                 }
+
                 APP_ACTION_SKIP_FWD -> enqueueCommand("custom action: skip forward") {
                     playbackManager.skipForwardSuspend()
                 }
+
                 APP_ACTION_MARK_AS_PLAYED -> markAsPlayed()
+
                 APP_ACTION_STAR -> starEpisode()
+
                 APP_ACTION_UNSTAR -> unstarEpisode()
+
                 APP_ACTION_CHANGE_SPEED -> changePlaybackSpeed()
+
                 APP_ACTION_ARCHIVE -> archive()
+
                 APP_ACTION_PLAY_NEXT -> enqueueCommand("suctom action: play next") {
                     playbackManager.playNextInQueue()
                 }
@@ -749,7 +764,12 @@ class MediaSessionManager(
             val episode = playbackManager.getCurrentEpisode()
             episodeManager.markAsPlayedBlocking(episode, playbackManager, podcastManager)
             episode?.let {
-                episodeAnalytics.trackEvent(AnalyticsEvent.EPISODE_MARKED_AS_PLAYED, source, it.uuid)
+                eventHorizon.track(
+                    EpisodeMarkedAsPlayedEvent(
+                        episodeUuid = it.uuid,
+                        source = source.eventHorizonValue,
+                    ),
+                )
             }
         }
     }
@@ -817,7 +837,12 @@ class MediaSessionManager(
                 if (it is PodcastEpisode) {
                     it.isArchived = true
                     episodeManager.archiveBlocking(it, playbackManager)
-                    episodeAnalytics.trackEvent(AnalyticsEvent.EPISODE_ARCHIVED, source, it.uuid)
+                    eventHorizon.track(
+                        EpisodeArchivedEvent(
+                            episodeUuid = it.uuid,
+                            source = source.eventHorizonValue,
+                        ),
+                    )
                 }
             }
         }

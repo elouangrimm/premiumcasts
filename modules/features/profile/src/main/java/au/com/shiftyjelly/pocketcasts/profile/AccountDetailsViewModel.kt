@@ -3,17 +3,12 @@ package au.com.shiftyjelly.pocketcasts.profile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import au.com.shiftyjelly.pocketcasts.account.onboarding.upgrade.OnboardingSubscriptionPlan
-import au.com.shiftyjelly.pocketcasts.account.onboarding.upgrade.ProfileUpgradeBannerState
-import au.com.shiftyjelly.pocketcasts.account.viewmodel.NewsletterSource
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsEvent
-import au.com.shiftyjelly.pocketcasts.analytics.AnalyticsTracker
 import au.com.shiftyjelly.pocketcasts.models.type.SignInState
 import au.com.shiftyjelly.pocketcasts.models.type.SubscriptionPlatform
 import au.com.shiftyjelly.pocketcasts.payment.BillingCycle
 import au.com.shiftyjelly.pocketcasts.payment.PaymentClient
 import au.com.shiftyjelly.pocketcasts.payment.PaymentResult
 import au.com.shiftyjelly.pocketcasts.payment.SubscriptionOffer
-import au.com.shiftyjelly.pocketcasts.payment.SubscriptionPlan
 import au.com.shiftyjelly.pocketcasts.payment.SubscriptionTier
 import au.com.shiftyjelly.pocketcasts.payment.getOrNull
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
@@ -21,10 +16,11 @@ import au.com.shiftyjelly.pocketcasts.profile.winback.WinbackInitParams
 import au.com.shiftyjelly.pocketcasts.repositories.sync.SyncManager
 import au.com.shiftyjelly.pocketcasts.repositories.user.UserManager
 import au.com.shiftyjelly.pocketcasts.utils.Gravatar
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import au.com.shiftyjelly.pocketcasts.utils.toDurationFromNow
 import com.automattic.android.tracks.crashlogging.CrashLogging
+import com.automattic.eventhorizon.EventHorizon
+import com.automattic.eventhorizon.NewsletterOptInChangedEvent
+import com.automattic.eventhorizon.NewsletterSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -45,17 +41,17 @@ class AccountDetailsViewModel @Inject constructor(
     private val paymentClient: PaymentClient,
     private val syncManager: SyncManager,
     private val settings: Settings,
-    private val analyticsTracker: AnalyticsTracker,
+    private val eventHorizon: EventHorizon,
     private val crashLogging: CrashLogging,
 ) : ViewModel() {
     internal val deleteAccountState = MutableStateFlow<DeleteAccountState>(DeleteAccountState.Empty)
-    internal val selectedFeatureCard = MutableStateFlow<SubscriptionPlan.Key?>(null)
     internal val signInState = userManager.getSignInState()
     internal val marketingOptIn = settings.marketingOptIn.flow
 
     internal val headerState = signInState.asFlow().map { state ->
         when (state) {
             is SignInState.SignedOut -> AccountHeaderState.empty()
+
             is SignInState.SignedIn -> {
                 val subscription = state.subscription
                 AccountHeaderState(
@@ -83,44 +79,38 @@ class AccountDetailsViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, started = SharingStarted.Eagerly, initialValue = AccountHeaderState.empty())
 
-    internal val upgradeBannerState = combine(
-        signInState.asFlow(),
-        selectedFeatureCard,
-    ) { signInState, featureCard ->
+    internal val recommendedPlanState = signInState.asFlow().map { signInState ->
         val signedInState = signInState as? SignInState.SignedIn
         val isExpiring = signedInState?.subscription?.isExpiring == true
 
-        val subscriptionPlans = paymentClient.loadSubscriptionPlans().getOrNull()
-        return@combine if (subscriptionPlans == null) {
-            null
-        } else {
-            if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)) {
-                if (signedInState?.subscription != null) {
-                    null
-                } else {
-                    val recommendedPlan = subscriptionPlans.findOfferPlan(tier = SubscriptionTier.Plus, BillingCycle.Yearly, offer = SubscriptionOffer.Trial).getOrNull()?.let {
-                        OnboardingSubscriptionPlan.create(plan = it).getOrNull()
-                    } ?: OnboardingSubscriptionPlan.create(subscriptionPlans.getBasePlan(tier = SubscriptionTier.Plus, billingCycle = BillingCycle.Yearly))
-                    ProfileUpgradeBannerState.NewOnboardingUpgradeState(
-                        recommendedSubscription = recommendedPlan,
-                    )
-                }
-            } else {
-                ProfileUpgradeBannerState.OldProfileUpgradeBannerState(
-                    subscriptionPlans = subscriptionPlans,
-                    selectedFeatureCard = featureCard,
-                    currentSubscription = signedInState?.subscription?.let { subscription ->
-                        SubscriptionPlan.Key(
-                            tier = subscription.tier,
-                            billingCycle = subscription.billingCycle ?: return@let null,
-                            offer = null,
-                        )
-                    },
-                    isRenewingSubscription = isExpiring,
-                )
-            }
+        if (!signInState.isSignedInAsFree && !isExpiring) {
+            return@map null
         }
-            .takeIf { signInState.isSignedInAsFree || isExpiring }
+
+        val subscription = signedInState?.subscription
+        if (subscription != null) {
+            return@map null
+        }
+
+        val subscriptionPlans = paymentClient.loadSubscriptionPlans().getOrNull()
+        if (subscriptionPlans == null) {
+            return@map null
+        }
+
+        subscriptionPlans
+            .findOfferPlan(
+                tier = SubscriptionTier.Plus,
+                billingCycle = BillingCycle.Yearly,
+                offer = SubscriptionOffer.Trial,
+            )
+            .getOrNull()
+            ?.let { OnboardingSubscriptionPlan.create(plan = it).getOrNull() }
+            ?: OnboardingSubscriptionPlan.create(
+                subscriptionPlans.getBasePlan(
+                    tier = SubscriptionTier.Plus,
+                    billingCycle = BillingCycle.Yearly,
+                ),
+            )
     }.stateIn(viewModelScope, started = SharingStarted.Eagerly, initialValue = null)
 
     internal val sectionsState = combine(
@@ -128,13 +118,12 @@ class AccountDetailsViewModel @Inject constructor(
         marketingOptIn,
     ) { signInState, marketingOptIn ->
         val signedInState = signInState as? SignInState.SignedIn
-        val isGiftExpiring = signedInState?.subscription?.isExpiring == true
         AccountSectionsState(
             isSubscribedToNewsLetter = marketingOptIn,
             email = signedInState?.email,
             winbackInitParams = computeWinbackParams(signInState),
             canChangeCredentials = !syncManager.isGoogleLogin(),
-            canUpgradeAccount = signedInState?.isSignedInAsPlus == true && (isGiftExpiring || FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)),
+            canUpgradeAccount = signedInState?.isSignedInAsPlus == true,
             canCancelSubscription = signedInState?.isSignedInAsPaid == true,
         )
     }.stateIn(
@@ -158,6 +147,7 @@ class AccountDetailsViewModel @Inject constructor(
         } else {
             when (val subscriptionsResult = paymentClient.loadAcknowledgedSubscriptions()) {
                 is PaymentResult.Failure -> WinbackInitParams.Empty
+
                 is PaymentResult.Success -> WinbackInitParams(
                     hasGoogleSubscription = subscriptionsResult.value.any { it.isAutoRenewing },
                 )
@@ -198,20 +188,13 @@ class AccountDetailsViewModel @Inject constructor(
     }
 
     fun updateNewsletter(isChecked: Boolean) {
-        analyticsTracker.track(
-            AnalyticsEvent.NEWSLETTER_OPT_IN_CHANGED,
-            mapOf(SOURCE_KEY to NewsletterSource.PROFILE.analyticsValue, ENABLED_KEY to isChecked),
+        eventHorizon.track(
+            NewsletterOptInChangedEvent(
+                source = NewsletterSource.Profile,
+                enabled = isChecked,
+            ),
         )
         settings.marketingOptIn.set(isChecked, updateModifiedAt = true)
-    }
-
-    internal fun changeSelectedFeatureCard(key: SubscriptionPlan.Key) {
-        selectedFeatureCard.value = key
-    }
-
-    companion object {
-        private const val SOURCE_KEY = "source"
-        private const val ENABLED_KEY = "enabled"
     }
 }
 

@@ -20,8 +20,11 @@ import androidx.media3.extractor.mp3.Mp3Extractor
 import au.com.shiftyjelly.pocketcasts.models.entity.BaseEpisode
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
 import au.com.shiftyjelly.pocketcasts.servers.di.Player
+import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
+import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import com.automattic.android.tracks.crashlogging.CrashLogging
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -33,7 +36,7 @@ import timber.log.Timber
 @OptIn(UnstableApi::class)
 class ExoPlayerDataSourceFactory @Inject constructor(
     @ApplicationContext private val context: Context,
-    @Player private val client: OkHttpClient,
+    @Player private val httpClient: Lazy<OkHttpClient>,
     private val settings: Settings,
     private val crashLogging: CrashLogging,
 ) {
@@ -48,7 +51,10 @@ class ExoPlayerDataSourceFactory @Inject constructor(
         LogBuffer.e(LogBuffer.TAG_PLAYBACK, errorMessage)
     }.getOrNull()
 
-    private val defaultFactory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(client))
+    private val defaultFactory = DefaultDataSource.Factory(
+        context,
+        OkHttpDataSource.Factory { request -> httpClient.get().newCall(request) },
+    )
 
     val cacheFactory get() = CacheDataSource.Factory()
         .setUpstreamDataSourceFactory(defaultFactory)
@@ -89,11 +95,15 @@ class ExoPlayerDataSourceFactory @Inject constructor(
         )
 
         val dataFactory = cacheFactory ?: defaultFactory
-        return when {
+        val factory = when {
             episodeLocation.episode.isHLS -> HlsMediaSource.Factory(dataFactory)
             (clipRange != null) -> DefaultMediaSourceFactory(dataFactory, extractorsFactory)
             else -> ProgressiveMediaSource.Factory(dataFactory, extractorsFactory)
-        }.createMediaSource(mediaItem)
+        }
+        if (FeatureFlag.isEnabled(Feature.LOAD_ERROR_HANDLING_POLICY)) {
+            factory.setLoadErrorHandlingPolicy(PocketCastsLoadErrorHandlingPolicy())
+        }
+        return factory.createMediaSource(mediaItem)
     }
 
     private fun startCachingEntireEpisodeIfNeeded(

@@ -42,6 +42,7 @@ class PaymentClient @Inject constructor(
         key: SubscriptionPlan.Key,
         purchaseSource: String,
         activity: Activity,
+        purchaseFlow: String? = null,
     ): PurchaseResult = coroutineScope {
         forEachListener { onPurchaseSubscriptionPlan(key) }
         val purchaseUpdatesJob = launch(start = CoroutineStart.UNDISPATCHED) { listenToPurchaseUpdates() }
@@ -59,7 +60,7 @@ class PaymentClient @Inject constructor(
             }
         }
         purchaseUpdatesJob.cancelAndJoin()
-        forEachListener { onSubscriptionPurchased(key, purchaseSource, purchaseResult) }
+        forEachListener { onSubscriptionPurchased(key = key, purchaseSource = purchaseSource, purchaseFlow = purchaseFlow, result = purchaseResult) }
         purchaseResult
     }
 
@@ -142,16 +143,24 @@ class PaymentClient @Inject constructor(
             return null
         }
 
-        return AcknowledgedSubscription(state.orderId, productKey.tier, productKey.billingCycle, isAutoRenewing)
+        val acknowledgedSubscription = AcknowledgedSubscription(state.orderId, productKey.tier, productKey.billingCycle, isAutoRenewing, productKey.isInstallment)
+        return acknowledgedSubscription
     }
 
     private fun findMatchingProductKey(productId: String): SubscriptionPlan.Key? {
-        val keys = SubscriptionTier.entries.flatMap { tier ->
-            BillingCycle.entries.map { cycle ->
-                SubscriptionPlan.Key(tier, cycle, offer = null)
+        val allKeys = SubscriptionTier.entries.flatMap { tier ->
+            BillingCycle.entries.flatMap { cycle ->
+                listOfNotNull(
+                    SubscriptionPlan.Key(tier, cycle, offer = null, isInstallment = false),
+                    if (tier == SubscriptionTier.Plus && cycle == BillingCycle.Yearly) {
+                        SubscriptionPlan.Key(tier, cycle, offer = null, isInstallment = true)
+                    } else {
+                        null
+                    },
+                )
             }
         }
-        return keys.firstOrNull { it.productId == productId }
+        return allKeys.firstOrNull { it.productId == productId }
     }
 
     private fun forEachListener(block: Listener.() -> Unit) {
@@ -173,7 +182,7 @@ class PaymentClient @Inject constructor(
 
         fun onPurchaseSubscriptionPlan(key: SubscriptionPlan.Key) = Unit
 
-        fun onSubscriptionPurchased(key: SubscriptionPlan.Key, purchaseSource: String, result: PurchaseResult) = Unit
+        fun onSubscriptionPurchased(key: SubscriptionPlan.Key, purchaseSource: String, purchaseFlow: String?, result: PurchaseResult) = Unit
 
         fun onConfirmPurchase(purchase: Purchase) = Unit
 
@@ -200,6 +209,7 @@ class PaymentClient @Inject constructor(
 
 private fun PaymentResult<*>.toPurchaseResult() = when (this) {
     is PaymentResult.Success -> PurchaseResult.Purchased
+
     is PaymentResult.Failure -> when (code) {
         PaymentResultCode.UserCancelled -> PurchaseResult.Cancelled
         else -> PurchaseResult.Failure(code)

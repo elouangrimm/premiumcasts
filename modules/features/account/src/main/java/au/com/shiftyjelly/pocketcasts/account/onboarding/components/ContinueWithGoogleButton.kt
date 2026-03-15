@@ -8,7 +8,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.TextUnit
@@ -36,7 +35,6 @@ fun ContinueWithGoogleButton(
     fontSize: TextUnit? = null,
     includePadding: Boolean = true,
     viewModel: GoogleSignInButtonViewModel = hiltViewModel(),
-    event: AnalyticsEvent = AnalyticsEvent.SETUP_ACCOUNT_BUTTON_TAPPED,
     label: String = stringResource(LR.string.onboarding_continue_with_google),
 ) {
     val activity = checkNotNull(LocalActivity.current)
@@ -70,7 +68,6 @@ fun ContinueWithGoogleButton(
             flow = flow,
             onSuccess = onComplete,
             onError = showError,
-            event = event,
             activity = activity,
             onLegacySignInIntent = {
                 googleLegacySignInLauncher.launch(it)

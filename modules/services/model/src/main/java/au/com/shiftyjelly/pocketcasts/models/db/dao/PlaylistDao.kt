@@ -31,7 +31,12 @@ import au.com.shiftyjelly.pocketcasts.models.type.SmartRules
 import au.com.shiftyjelly.pocketcasts.utils.extensions.escapeLike
 import au.com.shiftyjelly.pocketcasts.utils.extensions.unidecode
 import java.time.Clock
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 @Dao
@@ -48,51 +53,29 @@ abstract class PlaylistDao {
     @Upsert
     abstract suspend fun upsertManualEpisodes(episode: Collection<ManualPlaylistEpisode>)
 
-    @Query("SELECT * FROM playlists WHERE deleted = 0 AND draft = 0 ORDER BY sortPosition ASC")
-    abstract suspend fun getAllPlaylists(): List<PlaylistEntity>
-
     @Query(
         """
         SELECT * 
         FROM playlists
-        WHERE deleted IS 0 AND draft IS 0 AND autoDownload IS NOT 0
+        WHERE deleted IS 0 AND autoDownload IS NOT 0
     """,
     )
     abstract suspend fun getAllAutoDownloadPlaylists(): List<PlaylistEntity>
 
-    @Query("SELECT * FROM playlists WHERE deleted = 0 AND draft = 0 ORDER BY sortPosition ASC")
+    @Query("SELECT * FROM playlists WHERE deleted = 0 ORDER BY sortPosition ASC")
     abstract fun allPlaylistsFlow(): Flow<List<PlaylistEntity>>
+
+    @Query("SELECT * FROM playlists WHERE uuid = :uuid")
+    abstract suspend fun findPlaylistByUuid(uuid: String): PlaylistEntity?
 
     @Query(
         """
         SELECT
-          playlist.uuid AS uuid,
-          playlist.title AS title,
-          (
-            SELECT
-              COUNT(*)
-            FROM
-              manual_playlist_episodes AS episode
-            WHERE
-              episode.playlist_uuid IS playlist.uuid
-          ) AS episode_count,
-          (
-            SELECT
-              EXISTS(
-                SELECT
-                  *
-                FROM
-                  manual_playlist_episodes AS episode
-                WHERE
-                  episode.playlist_uuid IS playlist.uuid
-                  AND episode.episode_uuid IS :episodeUuid
-              )
-          ) AS has_episode
+          playlist.*
         FROM
           playlists AS playlist
         WHERE
           deleted IS 0
-          AND draft IS 0
           AND playlist.manual IS NOT 0
           AND (
             -- trim isn't really needed because we trim in the application logic but it helps with tests
@@ -103,11 +86,32 @@ abstract class PlaylistDao {
           sortPosition ASC
     """,
     )
-    protected abstract fun playlistPreviewsForEpisodeFlowUnsafe(episodeUuid: String, searchTerm: String): Flow<List<PlaylistPreviewForEpisode>>
+    protected abstract fun allManualPlaylistsFlow(searchTerm: String): Flow<List<PlaylistEntity>>
 
-    fun playlistPreviewsForEpisodeFlow(episodeUuid: String, searchTerm: String): Flow<List<PlaylistPreviewForEpisode>> {
+    @Query("SELECT episode_uuid FROM manual_playlist_episodes WHERE playlist_uuid = :playlistUuid")
+    protected abstract fun playlistEpisodeUuids(playlistUuid: String): Flow<List<String>>
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun playlistPreviewsForEpisodeFlow(searchTerm: String): Flow<List<PlaylistPreviewForEpisode>> {
         val escapedTerm = searchTerm.escapeLike('\\')
-        return playlistPreviewsForEpisodeFlowUnsafe(episodeUuid, escapedTerm)
+        return allManualPlaylistsFlow(escapedTerm)
+            .flatMapLatest { playlists ->
+                if (playlists.isEmpty()) {
+                    flowOf(emptyList())
+                } else {
+                    val episodeFlow = playlists.map { playlist ->
+                        playlistEpisodeUuids(playlist.uuid).map { episodeUuids ->
+                            PlaylistPreviewForEpisode(
+                                uuid = playlist.uuid,
+                                title = playlist.title,
+                                episodeUuids = episodeUuids.toSet(),
+                            )
+                        }
+                    }
+                    combine(episodeFlow) { flows -> flows.toList() }
+                }
+            }
+            .distinctUntilChanged()
     }
 
     @Query("SELECT * FROM playlists WHERE uuid IN (:uuids)")
@@ -120,19 +124,16 @@ abstract class PlaylistDao {
         }
     }
 
-    @Query("SELECT * FROM playlists WHERE draft = 0 AND syncStatus = $SYNC_STATUS_NOT_SYNCED")
+    @Query("SELECT * FROM playlists WHERE syncStatus = $SYNC_STATUS_NOT_SYNCED")
     abstract suspend fun getAllUnsyncedPlaylists(): List<PlaylistEntity>
 
     @Query("SELECT uuid FROM playlists ORDER BY sortPosition ASC")
     abstract suspend fun getAllPlaylistUuids(): List<String>
 
-    @Query("SELECT * FROM playlists WHERE manual = 0 AND deleted = 0 AND draft = 0 AND uuid = :uuid")
-    abstract suspend fun getSmartPlaylistFlow(uuid: String): PlaylistEntity?
-
-    @Query("SELECT * FROM playlists WHERE manual = 0 AND deleted = 0 AND draft = 0 AND uuid = :uuid")
+    @Query("SELECT * FROM playlists WHERE manual = 0 AND deleted = 0 AND uuid = :uuid")
     abstract fun smartPlaylistFlow(uuid: String): Flow<PlaylistEntity?>
 
-    @Query("SELECT * FROM playlists WHERE manual != 0 AND deleted = 0 AND draft = 0 AND uuid = :uuid")
+    @Query("SELECT * FROM playlists WHERE manual != 0 AND deleted = 0 AND uuid = :uuid")
     abstract fun manualPlaylistFlow(uuid: String): Flow<PlaylistEntity?>
 
     @Query("UPDATE playlists SET sortPosition = :position, syncStatus = $SYNC_STATUS_NOT_SYNCED WHERE uuid = :uuid")
@@ -232,9 +233,6 @@ abstract class PlaylistDao {
     """,
     )
     abstract fun manualPlaylistMetadataFlow(playlistUuid: String): Flow<PlaylistEpisodeMetadata>
-
-    @Query("SELECT episode_uuid FROM manual_playlist_episodes WHERE playlist_uuid IS :playlistUuid")
-    abstract suspend fun getManualPlaylistEpisodeUuids(playlistUuid: String): List<String>
 
     @Query(
         """
@@ -552,6 +550,7 @@ abstract class PlaylistDao {
           podcast_episode.played_up_to_modified AS p_played_up_to_modified,
           podcast_episode.duration_modified AS p_duration_modified,
           podcast_episode.starred_modified AS p_starred_modified,
+          podcast_episode.last_starred_date AS p_last_starred_date,
           podcast_episode.archived AS p_archived,
           podcast_episode.archived_modified AS p_archived_modified,
           podcast_episode.season AS p_season,
@@ -566,7 +565,8 @@ abstract class PlaylistDao {
           podcast_episode.image_url AS p_image_url,
           podcast_episode.deselected_chapters AS p_deselected_chapters,
           podcast_episode.deselected_chapters_modified AS p_deselected_chapters_modified,
-          podcast_episode.slug AS p_slug
+          podcast_episode.slug AS p_slug,
+          podcast_episode.has_generated_transcript AS p_has_generated_transcript
         FROM manual_playlist_episodes AS manual_episode
         LEFT JOIN podcast_episodes AS podcast_episode ON podcast_episode.uuid IS manual_episode.episode_uuid
         LEFT JOIN podcasts AS podcast ON podcast.uuid IS manual_episode.podcast_uuid
@@ -583,6 +583,7 @@ abstract class PlaylistDao {
             OR podcast.clean_title LIKE '%' || :searchTerm || '%' ESCAPE '\'
             OR podcast_episode.cleanTitle LIKE '%' || :searchTerm || '%' ESCAPE '\'
           )
+          OR manual_episode.episode_uuid IS :forcedEpisodeUuid
         ORDER BY
           -- newest to oldest
           CASE WHEN playlist.sortId IS 0 THEN IFNULL(podcast_episode.published_date, manual_episode.published_at) END DESC,
@@ -604,12 +605,14 @@ abstract class PlaylistDao {
     internal abstract fun manualEpisodesRawFlow(
         playlistUuid: String,
         searchTerm: String,
+        forcedEpisodeUuid: String?,
     ): Flow<List<RawManualEpisode>>
 
     fun manualEpisodesFlow(
         playlistUuid: String,
-        searchTerm: String,
-    ) = manualEpisodesRawFlow(playlistUuid, searchTerm.escapeLike('\\')).map { rawEpisodes ->
+        searchTerm: String = "",
+        forcedEpisodeUuid: String? = null,
+    ) = manualEpisodesRawFlow(playlistUuid, searchTerm.escapeLike('\\'), forcedEpisodeUuid).map { rawEpisodes ->
         rawEpisodes.map(RawManualEpisode::toEpisode)
     }
 
@@ -640,12 +643,18 @@ abstract class PlaylistDao {
         sortType: PlaylistEpisodeSortType,
         limit: Int,
         searchTerm: String? = null,
+        forcedEpisodeUuid: String? = null,
     ): Flow<List<PlaylistEpisode.Available>> {
         val escapedTerm = searchTerm?.takeIf(String::isNotBlank)?.escapeLike('\\')
         val query = createSmartPlaylistEpisodeQuery(
             selectClause = "episode.*",
             whereClause = buildString {
                 append(smartRules.toSqlWhereClause(clock))
+                if (forcedEpisodeUuid != null) {
+                    append(" OR (")
+                    append("episode.uuid = '$forcedEpisodeUuid'")
+                    append(')')
+                }
                 if (escapedTerm != null) {
                     append(" AND (")
                     append("episode.cleanTitle LIKE '%' || '$escapedTerm' || '%' ESCAPE '\\'")
@@ -682,8 +691,11 @@ abstract class PlaylistDao {
         // Drag & drop is not supported for smart playlists.
         // Fall back to newest to oldest instead.
         NewestToOldest, DragAndDrop -> "episode.published_date DESC, episode.added_date DESC"
+
         OldestToNewest -> "episode.published_date ASC, episode.added_date ASC"
+
         ShortestToLongest -> "episode.duration ASC, episode.added_date DESC"
+
         LongestToShortest -> "episode.duration DESC, episode.added_date DESC"
     }
 
@@ -697,14 +709,9 @@ abstract class PlaylistDao {
         FROM playlists AS playlist
         WHERE 
           playlist.deleted = 0 
-          AND playlist.draft = 0
-          AND (CASE 
-            WHEN :allowManual IS NOT 0 THEN 1 
-            ELSE playlist.manual = 0
-          END)
         ORDER BY playlist.sortPosition ASC 
         LIMIT 1
     """,
     )
-    abstract fun playlistShortcutFlow(allowManual: Boolean): Flow<PlaylistShortcut?>
+    abstract fun playlistShortcutFlow(): Flow<PlaylistShortcut?>
 }

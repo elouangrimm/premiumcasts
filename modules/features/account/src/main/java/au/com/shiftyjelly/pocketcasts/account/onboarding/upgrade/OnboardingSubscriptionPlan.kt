@@ -17,8 +17,6 @@ import au.com.shiftyjelly.pocketcasts.payment.SubscriptionOffer
 import au.com.shiftyjelly.pocketcasts.payment.SubscriptionPlan
 import au.com.shiftyjelly.pocketcasts.payment.SubscriptionTier
 import au.com.shiftyjelly.pocketcasts.settings.onboarding.OnboardingUpgradeSource
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.Feature
-import au.com.shiftyjelly.pocketcasts.utils.featureflag.FeatureFlag
 import java.math.BigDecimal
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -37,6 +35,7 @@ data class OnboardingSubscriptionPlan private constructor(
     val highlightedPrice
         get() = when (key.offer) {
             SubscriptionOffer.IntroOffer -> requireNotNull(discountedPricingPhase).price
+
             SubscriptionOffer.Trial,
             SubscriptionOffer.Referral,
             SubscriptionOffer.Winback,
@@ -47,6 +46,7 @@ data class OnboardingSubscriptionPlan private constructor(
     val crossedPrice
         get() = when (key.offer) {
             SubscriptionOffer.IntroOffer -> pricingPhase.price
+
             SubscriptionOffer.Trial,
             SubscriptionOffer.Referral,
             SubscriptionOffer.Winback,
@@ -64,6 +64,12 @@ data class OnboardingSubscriptionPlan private constructor(
         get() = when (key.tier) {
             SubscriptionTier.Plus -> IR.drawable.ic_plus
             SubscriptionTier.Patron -> IR.drawable.ic_patron
+        }
+
+    val badgeContentDescriptionRes
+        get() = when (key.tier) {
+            SubscriptionTier.Plus -> LR.string.pocket_casts_plus_badge
+            SubscriptionTier.Patron -> LR.string.pocket_casts_patron_badge
         }
 
     val pageTitle
@@ -144,6 +150,7 @@ data class OnboardingSubscriptionPlan private constructor(
     val offerBadgeText
         @Composable get() = when (key.offer) {
             SubscriptionOffer.IntroOffer -> stringResource(LR.string.half_price_first_year)
+
             SubscriptionOffer.Trial -> {
                 val discountedPhase = requireNotNull(discountedPricingPhase)
                 val recurringPeriods = (discountedPhase.schedule.recurrenceMode as RecurrenceMode.Recurring).value
@@ -152,7 +159,9 @@ data class OnboardingSubscriptionPlan private constructor(
             }
 
             SubscriptionOffer.Referral -> null
+
             SubscriptionOffer.Winback -> null
+
             null -> null
         }
 
@@ -174,6 +183,7 @@ data class OnboardingSubscriptionPlan private constructor(
     } else {
         when (key.offer) {
             SubscriptionOffer.Trial -> stringResource(LR.string.profile_start_free_trial)
+
             SubscriptionOffer.IntroOffer,
             SubscriptionOffer.Referral,
             SubscriptionOffer.Winback,
@@ -198,7 +208,7 @@ data class OnboardingSubscriptionPlan private constructor(
         get() {
             val items = when (key.tier) {
                 SubscriptionTier.Plus -> PlusUpgradeFeatureItem.entries.filter {
-                    !FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE) || it != PlusUpgradeFeatureItem.BannerAds
+                    it != PlusUpgradeFeatureItem.BannerAds
                 }
 
                 SubscriptionTier.Patron -> PatronUpgradeFeatureItem.entries
@@ -220,50 +230,30 @@ data class OnboardingSubscriptionPlan private constructor(
     fun customFeatureTitle(source: OnboardingUpgradeSource) = when (key.tier) {
         SubscriptionTier.Plus -> when (source) {
             OnboardingUpgradeSource.BANNER_AD -> LR.string.banner_ad_plus_prompt
-            OnboardingUpgradeSource.SKIP_CHAPTERS -> if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)) {
-                LR.string.onboarding_preselect_chapters_title
-            } else {
-                LR.string.skip_chapters_plus_prompt
-            }
 
-            OnboardingUpgradeSource.UP_NEXT_SHUFFLE -> if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)) {
-                LR.string.onboarding_shuffle_title
-            } else {
-                LR.string.up_next_shuffle_plus_prompt
-            }
+            OnboardingUpgradeSource.SKIP_CHAPTERS -> LR.string.onboarding_preselect_chapters_title
+
+            OnboardingUpgradeSource.UP_NEXT_SHUFFLE -> LR.string.onboarding_shuffle_title
 
             OnboardingUpgradeSource.THEMES -> LR.string.themes_plus_prompt
+
             OnboardingUpgradeSource.ICONS -> LR.string.icons_plus_prompt
+
             OnboardingUpgradeSource.FILES -> LR.string.files_plus_prompt
+
             OnboardingUpgradeSource.FOLDERS,
             OnboardingUpgradeSource.FOLDERS_PODCAST_SCREEN,
             OnboardingUpgradeSource.SUGGESTED_FOLDERS,
-            -> if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)) {
-                LR.string.onboarding_folders_title
-            } else {
-                LR.string.folders_plus_prompt
-            }
+            -> LR.string.onboarding_folders_title
 
             OnboardingUpgradeSource.BOOKMARKS,
             OnboardingUpgradeSource.BOOKMARKS_SHELF_ACTION,
-            -> if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)) {
-                LR.string.onboarding_bookmarks_title
-            } else {
-                LR.string.onboarding_plus_features_title
-            }
+            -> LR.string.onboarding_bookmarks_title
 
-            else -> if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)) {
-                LR.string.onboarding_upgrade_generic_title
-            } else {
-                LR.string.onboarding_plus_features_title
-            }
+            else -> LR.string.onboarding_upgrade_generic_title
         }
 
-        SubscriptionTier.Patron -> if (FeatureFlag.isEnabled(Feature.NEW_ONBOARDING_UPGRADE)) {
-            LR.string.onboarding_upgrade_patron_title
-        } else {
-            LR.string.onboarding_patron_features_title
-        }
+        SubscriptionTier.Patron -> LR.string.onboarding_upgrade_patron_title
     }
 
     companion object {

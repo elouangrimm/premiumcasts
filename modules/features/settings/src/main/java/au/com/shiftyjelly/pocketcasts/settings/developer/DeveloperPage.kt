@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Downloading
 import androidx.compose.material.icons.outlined.EditCalendar
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.Notifications
@@ -64,6 +65,7 @@ fun DeveloperPage(
     onResetPlaylistsOnboarding: () -> Unit,
     onResetNotificationsPrompt: () -> Unit,
     onShowAppReviewPrompt: () -> Unit,
+    onClearAppReviewSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var openCrashMessageDialog by remember { mutableStateOf(false) }
@@ -110,6 +112,9 @@ fun DeveloperPage(
             ShowAppReviewPrompt(onClick = onShowAppReviewPrompt)
         }
         item {
+            ClearAppReviewSettings(onClick = onClearAppReviewSettings)
+        }
+        item {
             NotificationsTesting(onClick = onShowNotificationsTestingClick)
         }
         item {
@@ -117,6 +122,9 @@ fun DeveloperPage(
         }
         item {
             ResetPlaylistsOnboarding(onClick = onResetPlaylistsOnboarding)
+        }
+        item {
+            CrashApp()
         }
     }
 
@@ -310,6 +318,19 @@ private fun ShowAppReviewPrompt(
 }
 
 @Composable
+private fun ClearAppReviewSettings(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SettingRow(
+        primaryText = "Clear app review settings",
+        secondaryText = "Reset all app review settings to help test",
+        icon = rememberVectorPainter(Icons.Outlined.Delete),
+        modifier = modifier.clickable { onClick() },
+    )
+}
+
+@Composable
 private fun NotificationsTesting(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -332,6 +353,20 @@ private fun ResetPlaylistsOnboarding(
         secondaryText = "Show Playlists onboarding and tooltips",
         icon = rememberVectorPainter(Icons.AutoMirrored.Outlined.PlaylistPlay),
         modifier = modifier.clickable { onClick() },
+    )
+}
+
+@Composable
+private fun CrashApp(
+    modifier: Modifier = Modifier,
+) {
+    SettingRow(
+        primaryText = "Go Bye Bye",
+        secondaryText = "Crashes the app",
+        icon = rememberVectorPainter(Icons.Outlined.ErrorOutline),
+        modifier = modifier.clickable {
+            throw RuntimeException("Crashing in 3, 2, 1… Boom!")
+        },
     )
 }
 
@@ -381,6 +416,7 @@ private fun DeveloperPagePreview() {
         onResetPlaylistsOnboarding = {},
         onResetNotificationsPrompt = {},
         onShowAppReviewPrompt = {},
+        onClearAppReviewSettings = {},
     )
 }
 
