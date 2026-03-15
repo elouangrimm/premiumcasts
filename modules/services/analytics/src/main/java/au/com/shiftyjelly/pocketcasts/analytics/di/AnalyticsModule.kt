@@ -12,6 +12,7 @@ import au.com.shiftyjelly.pocketcasts.analytics.Tracker
 import au.com.shiftyjelly.pocketcasts.analytics.experiments.Experiment
 import au.com.shiftyjelly.pocketcasts.analytics.experiments.ExperimentProvider
 import au.com.shiftyjelly.pocketcasts.servers.di.Cached
+import au.com.shiftyjelly.pocketcasts.utils.config.FirebaseInitUtil
 import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import com.automattic.android.experimentation.ExperimentLogger
 import com.automattic.android.experimentation.VariationsRepository
@@ -61,6 +62,7 @@ object AnalyticsModule {
     @Provides
     @Singleton
     fun provideFirebaseAnalytics(@ApplicationContext context: Context): FirebaseAnalyticsWrapper {
+        FirebaseInitUtil.ensureInitialized(context)
         return FirebaseAnalyticsWrapper(FirebaseAnalytics.getInstance(context))
     }
 
