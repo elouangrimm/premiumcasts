@@ -16,6 +16,8 @@ import au.com.shiftyjelly.pocketcasts.utils.log.LogBuffer
 import com.automattic.android.experimentation.ExperimentLogger
 import com.automattic.android.experimentation.VariationsRepository
 import com.automattic.eventhorizon.EventHorizon
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.google.firebase.analytics.FirebaseAnalytics
 import dagger.Lazy
 import dagger.Module
@@ -61,7 +63,18 @@ object AnalyticsModule {
     @Provides
     @Singleton
     fun provideFirebaseAnalytics(@ApplicationContext context: Context): FirebaseAnalyticsWrapper {
+        ensureFirebaseInitialized(context)
         return FirebaseAnalyticsWrapper(FirebaseAnalytics.getInstance(context))
+    }
+
+    private fun ensureFirebaseInitialized(context: Context) {
+        if (FirebaseApp.getApps(context).isEmpty()) {
+            val options = FirebaseOptions.Builder()
+                .setApplicationId("1:1234567890:android:dummy")
+                .setApiKey("dummy-api-key")
+                .build()
+            FirebaseApp.initializeApp(context, options)
+        }
     }
 
     @Provides
