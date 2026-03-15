@@ -25,7 +25,7 @@ class SubscriptionManagerImpl @Inject constructor(
             .onSuccess { membership ->
                 val unlockedMembership = membership.copy(
                     subscription = membership.subscription ?: Membership.Empty.subscription,
-                    features = listOf(MembershipFeature.NoBannerAds, MembershipFeature.NoDiscoverAds),
+                    features = (membership.features + listOf(MembershipFeature.NoBannerAds, MembershipFeature.NoDiscoverAds)).distinct(),
                 )
                 settings.cachedMembership.set(unlockedMembership, updateModifiedAt = false)
                 val subscription = unlockedMembership.subscription
