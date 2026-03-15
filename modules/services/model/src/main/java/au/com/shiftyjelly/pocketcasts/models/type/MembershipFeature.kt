@@ -1,5 +1,6 @@
 package au.com.shiftyjelly.pocketcasts.models.type
 
+import au.com.shiftyjelly.pocketcasts.payment.BillingCycle
 import au.com.shiftyjelly.pocketcasts.payment.SubscriptionTier
 import com.squareup.moshi.JsonClass
 import java.time.Instant
@@ -11,15 +12,21 @@ data class Membership(
     val features: List<MembershipFeature>,
 ) {
     fun hasFeature(feature: MembershipFeature): Boolean {
-        val isSubscriptionFeature = subscription?.tier?.hasFeature(feature) == true
-        return isSubscriptionFeature || feature in features
+        return true
     }
 
     companion object {
         val Empty = Membership(
-            subscription = null,
+            subscription = Subscription(
+                tier = SubscriptionTier.Patron,
+                billingCycle = BillingCycle.Yearly,
+                platform = SubscriptionPlatform.Android,
+                expiryDate = Instant.ofEpochSecond(4102444800),
+                isAutoRenewing = true,
+                giftDays = 0,
+            ),
             createdAt = null,
-            features = emptyList(),
+            features = listOf(MembershipFeature.NoBannerAds, MembershipFeature.NoDiscoverAds),
         )
     }
 }

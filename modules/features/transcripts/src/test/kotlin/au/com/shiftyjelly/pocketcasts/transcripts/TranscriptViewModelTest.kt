@@ -68,27 +68,29 @@ class TranscriptViewModelTest {
         viewModel.uiState.test {
             val state = awaitItem()
 
-            // Set free trial flag because it is avaialable by default in the test PaymentClient
-            assertEquals(UiState.Empty.copy(isFreeTrialAvailable = true), state)
+            // isPlusUser is true because premium is always unlocked
+            assertEquals(UiState.Empty.copy(isFreeTrialAvailable = true, isPlusUser = true), state)
         }
     }
 
     @Test
-    fun `update plus user status`() = runTest {
+    fun `plus user status is always true with premium unlocked`() = runTest {
         viewModel.uiState.test {
-            skipItems(1)
-
-            signInStateFlow.emit(SignInState.SignedIn("email", Subscription.PlusPreview))
+            // Initial state has isPlusUser = true since premium is unlocked
             assertTrue(awaitItem().isPlusUser)
+
+            // Switching sign-in states doesn't change isPlusUser since it's always true
+            signInStateFlow.emit(SignInState.SignedIn("email", Subscription.PlusPreview))
+            expectNoEvents()
 
             signInStateFlow.emit(SignInState.SignedIn("email", subscription = null))
-            assertFalse(awaitItem().isPlusUser)
+            expectNoEvents()
 
             signInStateFlow.emit(SignInState.SignedIn("email", Subscription.PatronPreview))
-            assertTrue(awaitItem().isPlusUser)
+            expectNoEvents()
 
             signInStateFlow.emit(SignInState.SignedOut)
-            assertFalse(awaitItem().isPlusUser)
+            expectNoEvents()
         }
     }
 

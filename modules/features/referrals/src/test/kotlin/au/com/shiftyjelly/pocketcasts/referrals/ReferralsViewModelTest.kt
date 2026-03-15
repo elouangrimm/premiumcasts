@@ -66,22 +66,22 @@ class ReferralsViewModelTest {
     }
 
     @Test
-    fun `referrals gift icon is not shown if signed out`() = runTest {
+    fun `referrals gift icon is shown if signed out with premium unlocked`() = runTest {
         initViewModel(SignInState.SignedOut)
 
         viewModel.state.test {
-            assertEquals(false, (awaitItem() as UiState.Loaded).showIcon)
+            assertEquals(true, (awaitItem() as UiState.Loaded).showIcon)
         }
     }
 
     @Test
-    fun `referrals gift icon is not shown for free account`() = runTest {
+    fun `referrals gift icon is shown for free account with premium unlocked`() = runTest {
         initViewModel(
             SignInState.SignedIn(email, subscription = null),
         )
 
         viewModel.state.test {
-            assertEquals(false, (awaitItem() as UiState.Loaded).showIcon)
+            assertEquals(true, (awaitItem() as UiState.Loaded).showIcon)
         }
     }
 
@@ -117,11 +117,11 @@ class ReferralsViewModelTest {
     }
 
     @Test
-    fun `tooltip is not shown for free account on launch`() = runTest {
+    fun `tooltip is shown for all accounts on launch with premium unlocked`() = runTest {
         initViewModel(SignInState.SignedOut)
 
         viewModel.state.test {
-            assertEquals(false, (awaitItem() as UiState.Loaded).showTooltip)
+            assertEquals(true, (awaitItem() as UiState.Loaded).showTooltip)
         }
     }
 
@@ -170,14 +170,14 @@ class ReferralsViewModelTest {
     }
 
     @Test
-    fun `profile banner is shown if signed in as free and referral code not empty`() = runTest {
+    fun `profile banner is hidden if signed in as free with premium unlocked`() = runTest {
         initViewModel(
             signInState = SignInState.SignedIn(email, subscription = null),
             referralCode = referralClaimCode,
         )
 
         viewModel.state.test {
-            assertEquals(true, (awaitItem() as UiState.Loaded).showProfileBanner)
+            assertEquals(false, (awaitItem() as UiState.Loaded).showProfileBanner)
         }
     }
 

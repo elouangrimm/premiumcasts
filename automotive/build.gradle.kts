@@ -37,7 +37,7 @@ android {
         }
 
         named("release") {
-            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_radioactive"
 
             if (project.findProperty("sentryAutomotiveProject")?.toString().isNullOrBlank()) {
                 println("WARNING: Sentry configuration not found. The ProGuard mapping files won't be uploaded.")

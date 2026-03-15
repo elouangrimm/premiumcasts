@@ -4,6 +4,7 @@ import au.com.shiftyjelly.pocketcasts.coroutines.SyncedAction
 import au.com.shiftyjelly.pocketcasts.coroutines.di.ApplicationScope
 import au.com.shiftyjelly.pocketcasts.coroutines.run
 import au.com.shiftyjelly.pocketcasts.models.type.Membership
+import au.com.shiftyjelly.pocketcasts.models.type.MembershipFeature
 import au.com.shiftyjelly.pocketcasts.models.type.Subscription
 import au.com.shiftyjelly.pocketcasts.models.type.SubscriptionPlatform
 import au.com.shiftyjelly.pocketcasts.preferences.Settings
@@ -22,8 +23,12 @@ class SubscriptionManagerImpl @Inject constructor(
     private val fetchMembershipAction = SyncedAction<Unit, Membership?> {
         runCatching { syncManager.subscriptionStatus().toMembership() }
             .onSuccess { membership ->
-                val subscription = membership.subscription
-                settings.cachedMembership.set(membership, updateModifiedAt = false)
+                val unlockedMembership = membership.copy(
+                    subscription = membership.subscription ?: Membership.Empty.subscription,
+                    features = (membership.features + listOf(MembershipFeature.NoBannerAds, MembershipFeature.NoDiscoverAds)).distinct(),
+                )
+                settings.cachedMembership.set(unlockedMembership, updateModifiedAt = false)
+                val subscription = unlockedMembership.subscription
                 if (subscription != null && !subscription.isChampion && subscription.platform == SubscriptionPlatform.Gift) {
                     settings.setTrialFinishedSeen(false)
                 }
@@ -32,7 +37,7 @@ class SubscriptionManagerImpl @Inject constructor(
     }
 
     override suspend fun fetchFreshSubscription(): Subscription? {
-        return fetchMembershipAction.run(scope)?.subscription
+        return fetchMembershipAction.run(scope)?.subscription ?: Membership.Empty.subscription
     }
 
     override fun clearCachedMembership() {

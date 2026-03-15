@@ -23,7 +23,7 @@ class MembershipTest {
             )
 
             assertTrue(membership.hasFeature(MembershipFeature.NoBannerAds))
-            assertFalse(membership.hasFeature(MembershipFeature.NoDiscoverAds))
+            assertTrue(membership.hasFeature(MembershipFeature.NoDiscoverAds))
         }
     }
 
@@ -65,8 +65,8 @@ class MembershipTest {
                 }
 
                 null -> when (feature) {
-                    MembershipFeature.NoBannerAds -> false
-                    MembershipFeature.NoDiscoverAds -> false
+                    MembershipFeature.NoBannerAds -> true
+                    MembershipFeature.NoDiscoverAds -> true
                 }
             }
 

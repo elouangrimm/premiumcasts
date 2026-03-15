@@ -31,10 +31,10 @@ class UpNextViewModelTest {
     }
 
     @Test
-    fun `initial state isSignedInAsPaidUser should be false for free user`() = runTest {
+    fun `initial state isSignedInAsPaidUser should be true for free user with premium unlocked`() = runTest {
         val viewModel = initViewModel(isPaidUser = false)
 
-        assertEquals(false, viewModel.isSignedInAsPaidUser.value)
+        assertEquals(true, viewModel.isSignedInAsPaidUser.value)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
